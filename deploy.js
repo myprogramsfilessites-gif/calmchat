@@ -18,7 +18,14 @@ const AUTH = { Authorization: 'Bearer ' + TOKEN };
 
 async function cf(method, p, body, extra) {
   const opts = { method, headers: { ...AUTH, ...(extra || {}) } };
-  if (body !== undefined) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+  if (body !== undefined) {
+    if (typeof body === 'string' || Buffer.isBuffer(body)) {
+      opts.body = body;
+    } else {
+      opts.body = JSON.stringify(body);
+      if (!opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
+    }
+  }
   const res = await fetch(API + p, opts);
   let data = null;
   const text = await res.text();
@@ -58,14 +65,18 @@ async function saveState(patch) {
 }
 
 async function ensureSubdomain(accountId) {
-  let res = await cf('GET', '/accounts/' + accountId + '/workers/subdomain');
-  if (res.result && res.result.enabled && res.result.subdomain) {
-    console.log('workers.dev subdomain:', res.result.subdomain);
-    return res.result.subdomain;
+  try {
+    const res = await cf('GET', '/accounts/' + accountId + '/workers/subdomain');
+    if (res.result && res.result.subdomain) {
+      console.log('workers.dev subdomain:', res.result.subdomain);
+      return res.result.subdomain;
+    }
+  } catch (e) {
+    console.log('no workers.dev subdomain yet, creating one...');
   }
   for (const cand of SUBDOMAIN_CANDIDATES) {
     try {
-      res = await cf('PUT', '/accounts/' + accountId + '/workers/subdomain', { subdomain: cand });
+      const res = await cf('PUT', '/accounts/' + accountId + '/workers/subdomain', { subdomain: cand });
       console.log('subdomain set:', cand);
       return cand;
     } catch (e) { console.log('subdomain', cand, 'unavailable, trying next'); }
@@ -96,7 +107,7 @@ async function uploadStatic(kvId, accountId) {
 
 async function uploadWorker(accountId, kvId) {
   const worker = fs.readFileSync(path.join(__dirname, 'worker.js'), 'utf8');
-  const metadata = {
+  const baseMeta = {
     main_module: 'worker.js',
     compatibility_date: '2025-01-01',
     compatibility_flags: [],
@@ -104,20 +115,31 @@ async function uploadWorker(accountId, kvId) {
       { name: 'KV', type: 'kv_namespace', namespace_id: kvId },
       { name: 'ROOMS', type: 'durable_object_namespace', class_name: 'Room' },
     ],
-    migrations: [{ tag: 'v1', new_classes: ['Room'] }],
   };
-  const fd = new FormData();
-  fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  fd.append('worker.js', new Blob([worker], { type: 'application/javascript+module' }), 'worker.js');
-  const res = await fetch(API + '/accounts/' + accountId + '/workers/scripts/' + SCRIPT, {
-    method: 'PUT',
-    headers: { ...AUTH, ...fd.getHeaders ? fd.getHeaders() : {} },
-    body: fd,
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error('Worker upload -> ' + res.status + ' ' + text.slice(0, 800));
-  console.log('Worker uploaded:', SCRIPT);
-  return JSON.parse(text);
+  for (const withMigration of [true, false]) {
+    const metadata = withMigration
+      ? { ...baseMeta, migrations: { tag: 'v1', new_sqlite_classes: ['Room'] } }
+      : baseMeta;
+    const fd = new FormData();
+    fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    fd.append('worker.js', new Blob([worker], { type: 'application/javascript+module' }), 'worker.js');
+    const res = await fetch(API + '/accounts/' + accountId + '/workers/scripts/' + SCRIPT, {
+      method: 'PUT',
+      headers: { ...AUTH, ...fd.getHeaders ? fd.getHeaders() : {} },
+      body: fd,
+    });
+    const text = await res.text();
+    if (res.ok) {
+      console.log('Worker uploaded:', SCRIPT, withMigration ? '(with migration)' : '(migration already applied)');
+      return JSON.parse(text);
+    }
+    const alreadyApplied = text.includes('10074') || text.includes('already depended');
+    if (!withMigration || !alreadyApplied) {
+      throw new Error('Worker upload -> ' + res.status + ' ' + text.slice(0, 800));
+    }
+    console.log('migration already applied, retrying without it');
+  }
+  throw new Error('Worker upload failed');
 }
 
 async function enableWorkersDev(accountId) {
@@ -144,7 +166,7 @@ async function verify(url) {
   const reg = await fetch(url + '/api/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nickname: 'tester' }),
+    body: JSON.stringify({ nickname: 'tester' + Date.now().toString(36) }),
   });
   const regJson = await reg.json();
   console.log('/api/register ->', reg.status, JSON.stringify(regJson));
@@ -181,15 +203,13 @@ async function testWebSocket(url, userId, roomId) {
   const wsUrl = url.replace('https://', 'wss://') + '/ws?userId=' + userId + '&roomId=' + roomId;
   const ws = new WebSocket(wsUrl);
   const done = new Promise((resolve) => {
-    const t = setTimeout(() => { console.log('WS test: timeout'); resolve(); }, 15000);
+    const t = setTimeout(() => { console.log('WS test: timeout, no message received'); resolve(); }, 15000);
     ws.on('message', (d) => {
       const msg = JSON.parse(d.toString());
-      if (msg.type === 'hello') {
-        console.log('WS test: hello received, id=', msg.id);
-        clearTimeout(t);
-        resolve();
-      }
+      console.log('WS test: received', msg.type, msg.peers ? 'peers=' + msg.peers.length : '');
+      if (msg.type === 'joined') { clearTimeout(t); resolve(); }
     });
+    ws.on('open', () => console.log('WS test: connected'));
     ws.on('error', (e) => { console.log('WS test error:', e.message); clearTimeout(t); resolve(); });
   });
   await done;
