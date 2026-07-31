@@ -101,6 +101,27 @@ async function wsHandler(request, env) {
   return stub.fetch(request);
 }
 
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
+
+async function serveStatic(env, url) {
+  let path = url.pathname;
+  if (path === '/') path = '/index.html';
+  if (path.startsWith('/')) path = path.slice(1);
+  const raw = await env.KV.get('asset:' + path);
+  if (raw === null) return new Response('Not found', { status: 404 });
+  const dot = path.lastIndexOf('.');
+  const ext = dot === -1 ? '' : path.slice(dot);
+  return new Response(raw, { headers: { 'Content-Type': MIME[ext] || 'application/octet-stream' } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -122,7 +143,7 @@ export default {
 
     if (path === '/ws') return wsHandler(request, env);
 
-    return env.ASSETS.fetch(request);
+    return serveStatic(env, url);
   },
 };
 
