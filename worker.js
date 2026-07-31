@@ -1,18 +1,8 @@
 'use strict';
 
-const CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-
-function genId(prefix, n) {
-  const arr = new Uint8Array(n);
-  crypto.getRandomValues(arr);
-  let s = prefix;
-  for (let i = 0; i < n; i++) s += CHARS[arr[i] % CHARS.length];
-  return s;
-}
-
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -27,79 +17,312 @@ function readBody(request) {
   return request.json().catch(() => ({}));
 }
 
-async function makeUserId(env) {
-  for (let i = 0; i < 8; i++) {
-    const id = genId('U', 10);
-    if (!(await env.KV.get('user:' + id))) return id;
-  }
-  return genId('U', 12);
+function randomHex(n) {
+  const arr = new Uint8Array(n);
+  crypto.getRandomValues(arr);
+  return [...arr].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function makeRoomId(env) {
-  for (let i = 0; i < 8; i++) {
-    const id = genId('C', 8);
-    if (!(await env.KV.get('room:' + id))) return id;
-  }
-  return genId('C', 10);
+async function hashPassword(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function publicUser(u) {
+  if (!u) return null;
+  return { id: u.id, nick: u.nick || '', avatar: u.avatar || '', createdAt: u.createdAt || 0 };
+}
+
+function chatIdForPair(a, b) {
+  const x = Number(a), y = Number(b);
+  return 'c' + Math.min(x, y) + '_' + Math.max(x, y);
+}
+
+// ---------- users ----------
+
+async function nextUserId(env) {
+  const cur = Number((await env.KV.get('meta:nextId')) || '100000');
+  const next = cur + 1;
+  await env.KV.put('meta:nextId', String(next));
+  return String(next);
+}
+
+async function getUser(env, id) {
+  const raw = await env.KV.get('user:' + id);
+  return raw ? JSON.parse(raw) : null;
 }
 
 async function apiRegister(env, body) {
-  const nickname = String(body.nickname || '').trim();
-  if (!nickname) return json(400, { error: 'Введи ник' });
-  if (nickname.length > 20) return json(400, { error: 'Ник слишком длинный' });
-  if (await env.KV.get('nick:' + nickname)) return json(409, { error: 'Этот ник уже занят' });
-  const avatar = body.avatar || null;
-  const id = await makeUserId(env);
-  const user = { id, nickname, avatar };
+  const nick = String(body.nick || '').trim();
+  const pass = String(body.password || '');
+  if (!nick || nick.length > 24) return json(400, { error: 'Введи ник (до 24 символов)' });
+  if (pass.length < 4) return json(400, { error: 'Пароль — минимум 4 символа' });
+  const lower = nick.toLowerCase();
+  if (await env.KV.get('nick:' + lower)) return json(409, { error: 'Этот ник уже занят' });
+  const id = await nextUserId(env);
+  const salt = randomHex(8);
+  const passHash = await hashPassword(pass, salt);
+  const user = { id, nick, avatar: String(body.avatar || '').trim(), salt, passHash, createdAt: Date.now() };
   await env.KV.put('user:' + id, JSON.stringify(user));
-  await env.KV.put('nick:' + nickname, id);
-  return json(200, { user });
+  await env.KV.put('nick:' + lower, id);
+  return json(200, { user: publicUser(user) });
 }
 
-async function apiGetUser(env, id) {
-  const raw = await env.KV.get('user:' + id);
-  if (!raw) return json(404, { error: 'not found' });
-  return json(200, { user: JSON.parse(raw) });
-}
-
-async function apiCreateRoom(env, body) {
-  const raw = await env.KV.get('user:' + String(body.userId || ''));
-  if (!raw) return json(404, { error: 'Пользователь не найден' });
-  const user = JSON.parse(raw);
-  const id = await makeRoomId(env);
-  const room = { id, owner_id: user.id, created_at: Date.now() };
-  await env.KV.put('room:' + id, JSON.stringify(room));
-  return json(200, { room });
-}
-
-async function apiRoomExists(env, body) {
-  const roomId = String(body.roomId || '').trim();
-  if (!roomId) return json(400, { error: 'Введи код комнаты' });
-  const room = await env.KV.get('room:' + roomId);
-  return json(200, { exists: !!room });
-}
-
-async function apiJoinRoom(env, body) {
-  const roomId = String(body.roomId || '').trim();
-  const user = await env.KV.get('user:' + String(body.userId || ''));
+async function apiLogin(env, body) {
+  const idOrNick = String(body.id || body.nick || '').trim();
+  const pass = String(body.password || '');
+  if (!idOrNick || !pass) return json(400, { error: 'Заполни все поля' });
+  let user = await getUser(env, idOrNick);
+  if (!user) {
+    const id = await env.KV.get('nick:' + idOrNick.toLowerCase());
+    if (id) user = await getUser(env, id);
+  }
   if (!user) return json(404, { error: 'Пользователь не найден' });
-  if (!roomId) return json(400, { error: 'Введи код комнаты' });
-  const room = await env.KV.get('room:' + roomId);
-  if (!room) return json(404, { error: 'Комната с таким кодом не найдена' });
-  return json(200, { room: JSON.parse(room) });
+  const h = await hashPassword(pass, user.salt || '');
+  if (h !== user.passHash) return json(401, { error: 'Неверный пароль' });
+  return json(200, { user: publicUser(user) });
 }
 
-async function wsHandler(request, env) {
-  const url = new URL(request.url);
-  const userId = url.searchParams.get('userId');
-  const roomId = url.searchParams.get('roomId');
-  if (!userId || !roomId) return new Response('bad request', { status: 400 });
-  const [u, r] = await Promise.all([env.KV.get('user:' + userId), env.KV.get('room:' + roomId)]);
-  if (!u || !r) return new Response('invalid session', { status: 404 });
-  const id = env.ROOMS.idFromName(roomId);
-  const stub = env.ROOMS.get(id);
+async function apiMe(env, userId) {
+  if (!userId) return json(400, { error: 'Нет userId' });
+  const user = await getUser(env, userId);
+  if (!user) return json(404, { error: 'Пользователь не найден' });
+  return json(200, { user: publicUser(user) });
+}
+
+async function apiChangeNick(env, body) {
+  const userId = String(body.userId || '');
+  const nick = String(body.nick || '').trim();
+  const user = await getUser(env, userId);
+  if (!user) return json(404, { error: 'Пользователь не найден' });
+  if (!nick || nick.length > 24) return json(400, { error: 'Введи ник (до 24 символов)' });
+  const lower = nick.toLowerCase();
+  const existing = await env.KV.get('nick:' + lower);
+  if (existing && existing !== userId) return json(409, { error: 'Этот ник уже занят' });
+  await env.KV.delete('nick:' + user.nick.toLowerCase());
+  user.nick = nick;
+  await env.KV.put('user:' + userId, JSON.stringify(user));
+  await env.KV.put('nick:' + lower, userId);
+  return json(200, { user: publicUser(user) });
+}
+
+async function apiChangeAvatar(env, body) {
+  const userId = String(body.userId || '');
+  const avatar = String(body.avatar || '').trim();
+  const user = await getUser(env, userId);
+  if (!user) return json(404, { error: 'Пользователь не найден' });
+  user.avatar = avatar;
+  await env.KV.put('user:' + userId, JSON.stringify(user));
+  return json(200, { user: publicUser(user) });
+}
+
+// ---------- requests & chats ----------
+
+async function notifyUser(env, userId, payload) {
+  try {
+    const stub = env.HUB.get(env.HUB.idFromName('global'));
+    await stub.fetch('https://hub/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, payload }),
+    });
+  } catch (e) {}
+}
+
+async function addUserChat(env, userId, chatId) {
+  const key = 'userchats:' + userId;
+  let list = [];
+  const raw = await env.KV.get(key);
+  if (raw) list = JSON.parse(raw);
+  if (!list.includes(chatId)) {
+    list.push(chatId);
+    await env.KV.put(key, JSON.stringify(list));
+  }
+}
+
+async function removeUserChat(env, userId, chatId) {
+  const key = 'userchats:' + userId;
+  const raw = await env.KV.get(key);
+  if (!raw) return;
+  const list = JSON.parse(raw).filter((c) => c !== chatId);
+  await env.KV.put(key, JSON.stringify(list));
+}
+
+async function apiSendRequest(env, body) {
+  const from = String(body.fromId || '');
+  const to = String(body.toId || '').trim();
+  if (!to || !from) return json(400, { error: 'Введи ID пользователя' });
+  if (from === to) return json(400, { error: 'Нельзя добавить себя' });
+  const toUser = await getUser(env, to);
+  if (!toUser) return json(404, { error: 'Пользователь с таким ID не найден' });
+  const chatId = chatIdForPair(from, to);
+  if (await env.KV.get('chat:' + chatId)) return json(409, { error: 'Чат с этим пользователем уже есть' });
+  if (await env.KV.get('req:' + from + ':' + to)) return json(409, { error: 'Заявка уже отправлена' });
+  const req = { from, to, createdAt: Date.now() };
+  await env.KV.put('req:' + from + ':' + to, JSON.stringify(req));
+  const fromUser = await getUser(env, from);
+  notifyUser(env, to, { type: 'request', request: { from, fromUser: publicUser(fromUser), createdAt: req.createdAt } });
+  return json(200, { ok: true });
+}
+
+async function apiListRequests(env, userId) {
+  if (!userId) return json(400, { error: 'Нет userId' });
+  const res = await env.KV.list({ prefix: 'req:' });
+  const requests = [];
+  for (const { name } of res.keys) {
+    if (!name.endsWith(':' + userId)) continue;
+    const raw = await env.KV.get(name);
+    if (!raw) continue;
+    const req = JSON.parse(raw);
+    const fromUser = await getUser(env, req.from);
+    requests.push({ from: req.from, createdAt: req.createdAt, fromUser: fromUser ? publicUser(fromUser) : null });
+  }
+  requests.sort((x, y) => y.createdAt - x.createdAt);
+  return json(200, { requests });
+}
+
+async function apiAcceptRequest(env, body) {
+  const userId = String(body.userId || '');
+  const from = String(body.from || '');
+  const to = userId;
+  const reqRaw = await env.KV.get('req:' + from + ':' + to);
+  if (!reqRaw) return json(404, { error: 'Заявка не найдена' });
+  await env.KV.delete('req:' + from + ':' + to);
+  const chatId = chatIdForPair(from, to);
+  let chat = null;
+  const rawChat = await env.KV.get('chat:' + chatId);
+  if (rawChat) chat = JSON.parse(rawChat);
+  if (!chat) {
+    chat = { id: chatId, a: from, b: to, createdAt: Date.now() };
+    await env.KV.put('chat:' + chatId, JSON.stringify(chat));
+    await addUserChat(env, from, chatId);
+    await addUserChat(env, to, chatId);
+  }
+  const fromUser = await getUser(env, from);
+  const toUser = await getUser(env, to);
+  notifyUser(env, from, { type: 'chat-created', chatId, other: publicUser(toUser) });
+  notifyUser(env, to, { type: 'chat-created', chatId, other: publicUser(fromUser) });
+  return json(200, { chat: { id: chatId, other: publicUser(fromUser) } });
+}
+
+async function apiDeclineRequest(env, body) {
+  const userId = String(body.userId || '');
+  const from = String(body.from || '');
+  await env.KV.delete('req:' + from + ':' + userId);
+  return json(200, { ok: true });
+}
+
+async function hubLast(env, chatId) {
+  try {
+    const stub = env.HUB.get(env.HUB.idFromName('global'));
+    const res = await stub.fetch('https://hub/last?chatId=' + encodeURIComponent(chatId));
+    const data = await res.json();
+    return data.last || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function apiChats(env, userId) {
+  if (!userId) return json(400, { error: 'Нет userId' });
+  const raw = await env.KV.get('userchats:' + userId);
+  const chatIds = raw ? JSON.parse(raw) : [];
+  const chats = [];
+  for (const chatId of chatIds) {
+    const rawChat = await env.KV.get('chat:' + chatId);
+    if (!rawChat) continue;
+    const chat = JSON.parse(rawChat);
+    const otherId = chat.a === userId ? chat.b : chat.a;
+    const other = (await getUser(env, otherId)) || { id: otherId, nick: 'Удалён', avatar: '' };
+    const last = await hubLast(env, chatId);
+    chats.push({ id: chat.id, other: publicUser(other), last });
+  }
+  chats.sort((x, y) => (y.last ? y.last.ts : 0) - (x.last ? x.last.ts : 0));
+  return json(200, { chats });
+}
+
+async function apiDeleteChat(env, body) {
+  const userId = String(body.userId || '');
+  const chatId = String(body.chatId || '');
+  const rawChat = await env.KV.get('chat:' + chatId);
+  if (!rawChat) return json(404, { error: 'Чат не найден' });
+  const chat = JSON.parse(rawChat);
+  if (chat.a !== userId && chat.b !== userId) return json(403, { error: 'Нет доступа' });
+  await removeUserChat(env, chat.a, chatId);
+  await removeUserChat(env, chat.b, chatId);
+  await env.KV.delete('chat:' + chatId);
+  try {
+    const stub = env.HUB.get(env.HUB.idFromName('global'));
+    await stub.fetch('https://hub/delete-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId }),
+    });
+  } catch (e) {}
+  const otherId = chat.a === userId ? chat.b : chat.a;
+  notifyUser(env, otherId, { type: 'chat-deleted', chatId });
+  return json(200, { ok: true });
+}
+
+// ---------- media ----------
+
+async function apiUpload(env, request) {
+  let form;
+  try { form = await request.formData(); } catch (e) { return json(400, { error: 'bad form' }); }
+  const userId = String(form.get('userId') || '');
+  const chatId = String(form.get('chatId') || '');
+  const type = String(form.get('type') || 'file');
+  const file = form.get('file');
+  if (!file) return json(400, { error: 'Нет файла' });
+  const rawChat = await env.KV.get('chat:' + chatId);
+  if (!rawChat) return json(404, { error: 'Чат не найден' });
+  const chat = JSON.parse(rawChat);
+  if (chat.a !== userId && chat.b !== userId) return json(403, { error: 'Нет доступа' });
+  const buf = await file.arrayBuffer();
+  if (buf.byteLength > 12 * 1024 * 1024) return json(413, { error: 'Файл больше 12 МБ' });
+  const name = String(file.name || '');
+  const ext = (name.split('.').pop() || (type === 'voice' ? 'webm' : 'bin')).toLowerCase();
+  const key = 'media/' + chatId + '/' + randomHex(8) + '.' + ext;
+  await env.KV.put(key, buf);
+  return json(200, { key });
+}
+
+async function apiMedia(env, request, path) {
+  const key = decodeURIComponent(path.slice('/media/'.length));
+  const userId = new URL(request.url).searchParams.get('userId');
+  const parts = key.split('/');
+  if (parts.length < 3 || !userId) return new Response('not found', { status: 404 });
+  const chatId = parts[1];
+  const rawChat = await env.KV.get('chat:' + chatId);
+  if (!rawChat) return new Response('not found', { status: 404 });
+  const chat = JSON.parse(rawChat);
+  if (chat.a !== userId && chat.b !== userId) return new Response('forbidden', { status: 403 });
+  const obj = await env.KV.get(key);
+  if (obj === null) return new Response('not found', { status: 404 });
+  const dot = key.lastIndexOf('.');
+  const ext = dot === -1 ? '' : key.slice(dot);
+  const headers = {
+    'Content-Type': MIME[ext] || 'application/octet-stream',
+    'Cache-Control': 'private, max-age=86400',
+    ...CORS,
+  };
+  return new Response(obj, { headers });
+}
+
+// ---------- hub proxy ----------
+
+async function hubFetch(request, env) {
+  const stub = env.HUB.get(env.HUB.idFromName('global'));
   return stub.fetch(request);
 }
+
+// ---------- static ----------
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -133,84 +356,174 @@ export default {
     if (path === '/health') return json(200, { ok: true });
 
     if (path === '/api/register' && method === 'POST') return apiRegister(env, await readBody(request));
+    if (path === '/api/login' && method === 'POST') return apiLogin(env, await readBody(request));
+    if (path === '/api/me' && method === 'GET') return apiMe(env, url.searchParams.get('userId'));
+    if (path === '/api/me/nick' && method === 'POST') return apiChangeNick(env, await readBody(request));
+    if (path === '/api/me/avatar' && method === 'POST') return apiChangeAvatar(env, await readBody(request));
 
-    const userMatch = path.match(/^\/api\/users\/([^/]+)$/);
-    if (userMatch && method === 'GET') return apiGetUser(env, userMatch[1]);
+    if (path === '/api/requests' && method === 'POST') return apiSendRequest(env, await readBody(request));
+    if (path === '/api/requests' && method === 'GET') return apiListRequests(env, url.searchParams.get('userId'));
+    if (path === '/api/requests/accept' && method === 'POST') return apiAcceptRequest(env, await readBody(request));
+    if (path === '/api/requests/decline' && method === 'POST') return apiDeclineRequest(env, await readBody(request));
 
-    if (path === '/api/room/create' && method === 'POST') return apiCreateRoom(env, await readBody(request));
-    if (path === '/api/room/exists' && method === 'POST') return apiRoomExists(env, await readBody(request));
-    if (path === '/api/room/join' && method === 'POST') return apiJoinRoom(env, await readBody(request));
+    if (path === '/api/chats' && method === 'GET') return apiChats(env, url.searchParams.get('userId'));
+    if (path === '/api/chats/delete' && method === 'POST') return apiDeleteChat(env, await readBody(request));
 
-    if (path === '/ws') return wsHandler(request, env);
+    if (path === '/api/messages' && method === 'GET') return hubFetch(request, env);
+    if (path === '/api/upload' && method === 'POST') return apiUpload(env, request);
+
+    if (path === '/ws') return hubFetch(request, env);
+
+    if (path.startsWith('/media/')) return apiMedia(env, request, path);
 
     return serveStatic(env, url);
   },
 };
 
-export class Room {
+export class Hub {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.members = new Map();
+    this.sockets = new Map();
+    try {
+      state.storage.sql.exec(
+        'CREATE TABLE IF NOT EXISTS messages (chat_id TEXT NOT NULL, seq INTEGER NOT NULL, from_id TEXT, type TEXT, text TEXT, media_key TEXT, media_type TEXT, ts INTEGER, PRIMARY KEY (chat_id, seq))'
+      );
+    } catch (e) {}
   }
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/ws') return this.handleWs(request, url);
+    if (url.pathname === '/notify' && request.method === 'POST') return this.handleNotify(request);
+    if (url.pathname === '/api/messages' && request.method === 'GET') return this.handleHistory(url);
+    if (url.pathname === '/last' && request.method === 'GET') return this.handleLast(url);
+    if (url.pathname === '/delete-chat' && request.method === 'POST') return this.handleDeleteChat(request);
+    return new Response('not found', { status: 404 });
+  }
+
+  async handleWs(request, url) {
     const userId = url.searchParams.get('userId');
-
-    const rawUser = await this.env.KV.get('user:' + userId);
-    if (!rawUser) return new Response('invalid', { status: 404 });
-    const user = JSON.parse(rawUser);
-
+    if (!userId || !(await this.env.KV.get('user:' + userId))) return new Response('invalid', { status: 404 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-
-    const self = { ws: server, muted: false, deaf: false, nickname: user.nickname, avatar: user.avatar };
-    this.members.set(userId, self);
-
-    const peers = [];
-    for (const [id, m] of this.members) {
-      if (id === userId) continue;
-      peers.push({ userId: id, nickname: m.nickname, avatar: m.avatar, muted: m.muted, deaf: m.deaf });
+    const existing = this.sockets.get(userId);
+    if (existing && existing !== server) {
+      try { existing.close(4001, 'replaced'); } catch (e) {}
     }
-
-    server.send(JSON.stringify({ type: 'joined', peers }));
-
-    this.broadcast(userId, {
-      type: 'peer-joined',
-      peer: { userId, nickname: user.nickname, avatar: user.avatar, muted: false, deaf: false },
-    });
-
+    this.sockets.set(userId, server);
     server.addEventListener('message', (event) => {
-      let msg;
-      try { msg = JSON.parse(event.data); } catch (e) { return; }
-      if (msg.type === 'signal') {
-        const target = this.members.get(msg.to);
-        if (target && target.ws.readyState === 1) {
-          target.ws.send(JSON.stringify({ type: 'signal', from: userId, data: msg.data }));
-        }
-      } else if (msg.type === 'mute') {
-        self.muted = !!msg.muted;
-        this.broadcast(userId, { type: 'peer-mute', userId, muted: self.muted });
-      } else if (msg.type === 'deaf') {
-        self.deaf = !!msg.deaf;
-        this.broadcast(userId, { type: 'peer-deaf', userId, deaf: self.deaf });
-      }
+      this.onMessage(userId, event).catch(() => {});
     });
-
-    server.addEventListener('close', () => {
-      this.members.delete(userId);
-      this.broadcast(userId, { type: 'peer-left', userId });
-    });
-
+    const cleanup = () => {
+      if (this.sockets.get(userId) === server) this.sockets.delete(userId);
+    };
+    server.addEventListener('close', cleanup);
+    server.addEventListener('error', cleanup);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  broadcast(exceptUserId, msg) {
-    const data = JSON.stringify(msg);
-    for (const [id, m] of this.members) {
-      if (id !== exceptUserId && m.ws.readyState === 1) m.ws.send(data);
+  async handleNotify(request) {
+    let body;
+    try { body = await request.json(); } catch (e) { return json(400, { error: 'bad' }); }
+    const ws = this.sockets.get(String(body.userId || ''));
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(body.payload));
+    return json(200, { ok: true });
+  }
+
+  async onMessage(userId, event) {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type === 'msg') {
+      await this.storeMessage(userId, msg);
+    } else if (msg.type === 'call-offer' || msg.type === 'call-answer' || msg.type === 'call-ice' ||
+               msg.type === 'call-decline' || msg.type === 'call-end') {
+      const target = this.sockets.get(String(msg.to || ''));
+      if (target && target.readyState === 1) {
+        target.send(JSON.stringify({ type: msg.type, from: userId, chatId: String(msg.chatId || ''), data: msg.data || null }));
+      }
     }
+  }
+
+  async storeMessage(userId, msg) {
+    const chatId = String(msg.chatId || '');
+    const rawChat = await this.env.KV.get('chat:' + chatId);
+    if (!rawChat) return;
+    const chat = JSON.parse(rawChat);
+    if (chat.a !== userId && chat.b !== userId) return;
+    const m = msg.msg || {};
+    const type = String(m.type || 'text');
+    const text = String(m.text || '').trim();
+    const mediaKey = String(m.mediaKey || '');
+    const mediaType = String(m.mediaType || '');
+    if (type === 'text' && !text) return;
+    if (type !== 'text' && !mediaKey) return;
+    const ts = Date.now();
+    let seq = Date.now() % 100000000;
+    try {
+      const cur = this.state.storage.sql.exec('SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_id=?', chatId).toArray();
+      seq = (cur && cur[0] && cur[0][0] != null) ? Number(cur[0][0]) + 1 : 1;
+    } catch (e) {}
+    const row = { seq, from: userId, type, text, mediaKey, mediaType, ts };
+    try {
+      this.state.storage.sql.exec(
+        'INSERT INTO messages (chat_id, seq, from_id, type, text, media_key, media_type, ts) VALUES (?,?,?,?,?,?,?,?)',
+        chatId, seq, userId, type, text, mediaKey, mediaType, ts
+      );
+    } catch (e) { return; }
+    const otherId = chat.a === userId ? chat.b : chat.a;
+    const sender = this.sockets.get(userId);
+    if (sender && sender.readyState === 1) {
+      sender.send(JSON.stringify({ type: 'msg-ack', chatId, msg: row }));
+    }
+    const target = this.sockets.get(otherId);
+    if (target && target.readyState === 1) {
+      target.send(JSON.stringify({ type: 'msg', chatId, msg: row }));
+    }
+  }
+
+  async handleHistory(url) {
+    const userId = url.searchParams.get('userId');
+    const chatId = url.searchParams.get('chatId');
+    const afterSeq = Number(url.searchParams.get('afterSeq')) || 0;
+    const rawChat = await this.env.KV.get('chat:' + chatId);
+    if (!rawChat) return json(404, { error: 'Чат не найден' });
+    const chat = JSON.parse(rawChat);
+    if (chat.a !== userId && chat.b !== userId) return json(403, { error: 'Нет доступа' });
+    try {
+      const cur = this.state.storage.sql.exec(
+        'SELECT seq, from_id, type, text, media_key, media_type, ts FROM messages WHERE chat_id=? AND seq>? ORDER BY seq ASC LIMIT 200',
+        chatId, afterSeq
+      ).toArray();
+      const messages = cur.map((r) => ({ seq: r[0], from: r[1], type: r[2], text: r[3], mediaKey: r[4], mediaType: r[5], ts: r[6] }));
+      return json(200, { messages });
+    } catch (e) {
+      return json(200, { messages: [] });
+    }
+  }
+
+  async handleLast(url) {
+    const chatId = url.searchParams.get('chatId');
+    try {
+      const cur = this.state.storage.sql.exec(
+        'SELECT seq, from_id, type, text, media_key, media_type, ts FROM messages WHERE chat_id=? ORDER BY seq DESC LIMIT 1',
+        chatId
+      ).toArray();
+      const row = cur[0];
+      const last = row ? { seq: row[0], from: row[1], type: row[2], text: row[3], mediaKey: row[4], mediaType: row[5], ts: row[6] } : null;
+      return json(200, { last });
+    } catch (e) {
+      return json(200, { last: null });
+    }
+  }
+
+  async handleDeleteChat(request) {
+    let body;
+    try { body = await request.json(); } catch (e) { return json(400, {}); }
+    try {
+      this.state.storage.sql.exec('DELETE FROM messages WHERE chat_id=?', String(body.chatId || ''));
+    } catch (e) {}
+    return json(200, { ok: true });
   }
 }

@@ -1,66 +1,65 @@
 'use strict';
 
 (function () {
-  const $ = (id) => document.getElementById(id);
-
   if (loadSession()) {
-    location.replace('lobby.html');
+    location.replace('app.html');
     return;
   }
 
-  let chosenIcon = null;
+  const $ = (id) => document.getElementById(id);
+  const errEl = $('auth-error');
 
-  function updatePreview() {
-    const nick = $('nickname-input').value.trim() || '?';
-    renderAvatar($('avatar-preview'), { nickname: nick, avatar: chosenIcon }, 'big');
+  function showError(text) {
+    errEl.textContent = text || '';
   }
 
-  function buildIcons() {
-    const getChosen = buildIconGrid($('icon-grid'), (icon) => {
-      chosenIcon = icon;
-      updatePreview();
-    });
+  function switchTab(which) {
+    $('tab-login').classList.toggle('active', which === 'login');
+    $('tab-reg').classList.toggle('active', which === 'reg');
+    $('login-form').hidden = which !== 'login';
+    $('reg-form').hidden = which !== 'reg';
+    showError('');
   }
 
-  async function register() {
-    $('register-error').textContent = '';
-    const nickname = $('nickname-input').value.trim();
-    if (!nickname) {
-      $('register-error').textContent = 'Введи ник';
-      return;
-    }
-    const btn = $('register-btn');
-    btn.disabled = true;
-    btn.textContent = 'Заходим…';
+  $('tab-login').addEventListener('click', () => switchTab('login'));
+  $('tab-reg').addEventListener('click', () => switchTab('reg'));
+
+  let chosenAvatar = null;
+  const getChosen = buildIconGrid($('reg-avatars'), (k) => { chosenAvatar = k; });
+  if (typeof getChosen === 'function') chosenAvatar = getChosen();
+
+  $('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    showError('');
+    const idOrNick = $('login-id').value.trim();
+    const pass = $('login-pass').value;
+    if (!idOrNick || !pass) { showError('Заполни все поля'); return; }
     try {
-      const data = await apiPost('/api/register', { nickname, avatar: chosenIcon });
-      if (data.error) {
-        $('register-error').textContent = data.error;
-        return;
-      }
+      const data = await api('POST', '/api/login', { id: idOrNick, nick: idOrNick, password: pass });
       saveSession(data.user);
-      showSuccess(data.user);
-    } catch (e) {
-      $('register-error').textContent = serverErrorText();
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Войти';
+      location.replace('app.html');
+    } catch (err) {
+      showError(err.message);
     }
-  }
+  });
 
-  function showSuccess(user) {
-    $('register-card').classList.add('hidden');
-    renderAvatar($('success-avatar'), user, 'big');
-    $('success-nick').textContent = user.nickname;
-    $('success-card').classList.remove('hidden');
-    setTimeout(() => location.replace('lobby.html'), 1400);
-  }
-
-  $('register-btn').addEventListener('click', register);
-  $('nickname-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') register(); });
-  $('nickname-input').addEventListener('input', updatePreview);
-
-  buildIcons();
-  updatePreview();
-  $('nickname-input').focus();
+  $('reg-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    showError('');
+    const nick = $('reg-nick').value.trim();
+    const pass = $('reg-pass').value;
+    if (!nick) { showError('Введи ник'); return; }
+    if (pass.length < 4) { showError('Пароль — минимум 4 символа'); return; }
+    try {
+      const data = await api('POST', '/api/register', { nick, password: pass, avatar: chosenAvatar || '' });
+      saveSession(data.user);
+      $('success-id').textContent = data.user.id;
+      $('auth-success').hidden = false;
+      showError('');
+      $('reg-form').hidden = true;
+      setTimeout(() => location.replace('app.html'), 1600);
+    } catch (err) {
+      showError(err.message);
+    }
+  });
 })();

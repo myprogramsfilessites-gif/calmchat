@@ -3,47 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>CalmChat — регистрация</title>
+  <title>CalmChat — вход</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%236366f1'/%3E%3Ctext x='12' y='16.5' font-size='12' text-anchor='middle' fill='white' font-family='sans-serif'%3EC%3C/text%3E%3C/svg%3E">
 </head>
 <body>
-  <div class="app">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">C</div>
+      <h1>CalmChat</h1>
+      <p class="auth-sub">Переписка и звонки с друзьями</p>
 
-    <section id="register-card" class="card">
-      <div class="brand">
-        <div class="brand-logo">
-          <svg viewBox="0 0 24 24"><path d="M12 3.5a3.2 3.2 0 0 0-3.2 3.2v5A3.2 3.2 0 0 0 12 14.9a3.2 3.2 0 0 0 3.2-3.2v-5A3.2 3.2 0 0 0 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0M12 18.1v2.6M9 20.7h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </div>
-        <h1>CalmChat</h1>
-        <p class="sub">Созвон с другом без паролей</p>
+      <div class="tabs">
+        <button id="tab-login" class="tab active" type="button">Вход</button>
+        <button id="tab-reg" class="tab" type="button">Регистрация</button>
       </div>
 
-      <div id="avatar-preview" class="avatar big"></div>
+      <form id="login-form">
+        <input id="login-id" placeholder="Ник или ID" autocomplete="username">
+        <input id="login-pass" type="password" placeholder="Пароль" autocomplete="current-password">
+        <button type="submit" class="btn primary block">Войти</button>
+      </form>
 
-      <label class="field-label" for="nickname-input">Твой ник</label>
-      <input id="nickname-input" class="input" maxlength="20" placeholder="Например, Вася" autocomplete="off">
-      <p id="register-error" class="error"></p>
+      <form id="reg-form" hidden>
+        <input id="reg-nick" placeholder="Ник (до 24 символов)" autocomplete="off" maxlength="24">
+        <input id="reg-pass" type="password" placeholder="Пароль (минимум 4 символа)" autocomplete="new-password">
+        <div class="avatar-picker" id="reg-avatars"></div>
+        <button type="submit" class="btn primary block">Создать аккаунт</button>
+      </form>
 
-      <div class="icon-grid" id="icon-grid"></div>
-      <p class="hint">Выбери иконку для кружка. Не выберешь — будет первая буква ника.</p>
-
-      <button id="register-btn" class="btn primary big">Войти</button>
-    </section>
-
-    <section id="success-card" class="card hidden">
-      <div id="success-avatar" class="avatar big"></div>
-      <h2 id="success-title" class="success-title">Добро пожаловать!</h2>
-      <p id="success-nick" class="success-nick"></p>
-      <p class="sub">Открываем комнаты…</p>
-    </section>
-
+      <p class="error" id="auth-error"></p>
+      <p class="auth-success" id="auth-success" hidden>
+        Аккаунт создан. Твой ID: <b id="success-id"></b>
+      </p>
+    </div>
   </div>
 
   <script src="config.js"></script>
   <script src="js/avatars.js"></script>
-  <script src="js/auth.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/register.js"></script>
 </body>
 </html>

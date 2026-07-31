@@ -113,12 +113,12 @@ async function uploadWorker(accountId, kvId) {
     compatibility_flags: [],
     bindings: [
       { name: 'KV', type: 'kv_namespace', namespace_id: kvId },
-      { name: 'ROOMS', type: 'durable_object_namespace', class_name: 'Room' },
+      { name: 'HUB', type: 'durable_object_namespace', class_name: 'Hub' },
     ],
   };
   for (const withMigration of [true, false]) {
     const metadata = withMigration
-      ? { ...baseMeta, migrations: { tag: 'v1', new_sqlite_classes: ['Room'] } }
+      ? { ...baseMeta, migrations: { tag: 'v2', new_sqlite_classes: ['Hub'], deleted_classes: ['Room'] } }
       : baseMeta;
     const fd = new FormData();
     fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
@@ -133,7 +133,7 @@ async function uploadWorker(accountId, kvId) {
       console.log('Worker uploaded:', SCRIPT, withMigration ? '(with migration)' : '(migration already applied)');
       return JSON.parse(text);
     }
-    const alreadyApplied = text.includes('10074') || text.includes('already depended');
+    const alreadyApplied = text.includes('10074') || /already (been )?applied/i.test(text) || /already depended/i.test(text);
     if (!withMigration || !alreadyApplied) {
       throw new Error('Worker upload -> ' + res.status + ' ' + text.slice(0, 800));
     }
@@ -163,62 +163,143 @@ async function verify(url) {
   const health = await waitFor(url + '/health', 12);
   console.log('/health ->', health.status, await health.text());
 
-  const reg = await fetch(url + '/api/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nickname: 'tester' + Date.now().toString(36) }),
-  });
-  const regJson = await reg.json();
-  console.log('/api/register ->', reg.status, JSON.stringify(regJson));
-  if (reg.status !== 200 || !regJson.user || !regJson.user.id) throw new Error('register failed');
-  const userId = regJson.user.id;
+  const stamp = Date.now().toString(36);
+  const nickA = 'alpha' + stamp;
+  const nickB = 'beta' + stamp;
 
-  const create = await fetch(url + '/api/room/create', {
+  const regA = await fetch(url + '/api/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify({ nick: nickA, password: 'pass1234', avatar: 'cat' }),
   });
-  const createJson = await create.json();
-  console.log('/api/room/create ->', create.status, JSON.stringify(createJson));
-  const roomId = createJson.room && createJson.room.id;
+  const a = await regA.json();
+  console.log('register A ->', regA.status, JSON.stringify(a.user || a));
+  if (regA.status !== 200 || !a.user || !/^\d+$/.test(a.user.id)) throw new Error('register A failed (id must be numeric)');
 
-  const join = await fetch(url + '/api/room/join', {
+  const dup = await fetch(url + '/api/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, roomId }),
+    body: JSON.stringify({ nick: nickA, password: 'pass1234' }),
   });
-  console.log('/api/room/join ->', join.status, JSON.stringify(await join.json()));
+  console.log('register dup ->', dup.status);
+  if (dup.status !== 409) throw new Error('duplicate nick must be 409');
+
+  const regB = await fetch(url + '/api/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nick: nickB, password: 'pass5678' }),
+  });
+  const b = await regB.json();
+  console.log('register B ->', regB.status, JSON.stringify(b.user || b));
+
+  const login = await fetch(url + '/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: a.user.id, password: 'pass1234' }),
+  });
+  console.log('login by id ->', login.status);
+
+  const loginNick = await fetch(url + '/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nick: nickA, password: 'pass1234' }),
+  });
+  console.log('login by nick ->', loginNick.status);
+
+  const badLogin = await fetch(url + '/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: a.user.id, password: 'wrong' }),
+  });
+  console.log('login wrong pass ->', badLogin.status);
+  if (badLogin.status !== 401) throw new Error('wrong password must be 401');
+
+  const req = await fetch(url + '/api/requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromId: a.user.id, toId: b.user.id }),
+  });
+  console.log('send request ->', req.status);
+
+  const reqs = await fetch(url + '/api/requests?userId=' + b.user.id);
+  const reqsJson = await reqs.json();
+  console.log('list requests ->', reqs.status, 'count:', reqsJson.requests && reqsJson.requests.length);
+  if (!reqsJson.requests || !reqsJson.requests.length) throw new Error('no requests');
+
+  const accept = await fetch(url + '/api/requests/accept', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: b.user.id, from: a.user.id }),
+  });
+  const acceptJson = await accept.json();
+  console.log('accept ->', accept.status, JSON.stringify(acceptJson.chat || acceptJson));
+  const chatId = acceptJson.chat && acceptJson.chat.id;
+  if (!chatId) throw new Error('accept failed');
+
+  const chatsA = await fetch(url + '/api/chats?userId=' + a.user.id);
+  const chatsAJson = await chatsA.json();
+  console.log('chats A ->', chatsA.status, 'count:', chatsAJson.chats && chatsAJson.chats.length);
+
+  await testMessages(url, a.user.id, b.user.id, chatId);
+
+  const changeNick = await fetch(url + '/api/me/nick', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: a.user.id, nick: 'alpha' + stamp + 'x' }),
+  });
+  console.log('change nick ->', changeNick.status);
 
   const root = await waitFor(url + '/', 12);
   const html = await root.text();
   console.log('GET / ->', root.status, 'contains <!DOCTYPE html>:', html.includes('<!DOCTYPE html>'));
-
-  if (roomId) await testWebSocket(url, userId, roomId);
 }
 
-async function testWebSocket(url, userId, roomId) {
+async function testMessages(url, userIdA, userIdB, chatId) {
   let WebSocket = null;
   try { WebSocket = require('ws'); } catch (e) {}
-  if (!WebSocket) { console.log('ws package not available, skipping WS test'); return; }
-  const wsUrl = url.replace('https://', 'wss://') + '/ws?userId=' + userId + '&roomId=' + roomId;
-  const ws = new WebSocket(wsUrl);
-  const done = new Promise((resolve) => {
-    const t = setTimeout(() => { console.log('WS test: timeout, no message received'); resolve(); }, 15000);
-    ws.on('message', (d) => {
-      const msg = JSON.parse(d.toString());
-      console.log('WS test: received', msg.type, msg.peers ? 'peers=' + msg.peers.length : '');
-      if (msg.type === 'joined') { clearTimeout(t); resolve(); }
-    });
-    ws.on('open', () => console.log('WS test: connected'));
-    ws.on('error', (e) => { console.log('WS test error:', e.message); clearTimeout(t); resolve(); });
+  if (!WebSocket || !chatId) { console.log('WS test skipped'); return; }
+
+  const wsa = new WebSocket(url.replace('https://', 'wss://') + '/ws?userId=' + userIdA);
+  const wsb = new WebSocket(url.replace('https://', 'wss://') + '/ws?userId=' + userIdB);
+
+  const waitConnected = (ws) => new Promise((res) => {
+    const t = setTimeout(() => res('timeout'), 10000);
+    ws.on('open', () => { clearTimeout(t); res('open'); });
+    ws.on('unexpected-response', (req, r) => { clearTimeout(t); console.log('WS unexpected response:', r.statusCode); res('rejected:' + r.statusCode); });
+    ws.on('error', (e) => { clearTimeout(t); res('error:' + (e && e.message)); });
   });
-  await done;
-  ws.close();
+
+  const okA = await waitConnected(wsa);
+  const okB = await waitConnected(wsb);
+  console.log('WS A connected:', okA, '| WS B connected:', okB);
+  if (okA !== 'open' || okB !== 'open') { wsa.close(); wsb.close(); throw new Error('WS connect failed'); }
+
+  const gotByB = new Promise((res) => {
+    const t = setTimeout(() => res('timeout'), 15000);
+    wsb.on('message', (d) => {
+      const m = JSON.parse(d.toString());
+      if (m.type === 'msg' && m.chatId === chatId) { clearTimeout(t); res(m.msg); }
+    });
+  });
+
+  await new Promise((r) => setTimeout(r, 500));
+  wsa.send(JSON.stringify({ type: 'msg', chatId, msg: { type: 'text', text: 'привет из теста' } }));
+
+  const recv = await gotByB;
+  console.log('WS message A->B:', recv && recv.text ? 'received: ' + recv.text : recv);
+  if (!recv || recv.text !== 'привет из теста') { wsa.close(); wsb.close(); throw new Error('WS message not delivered'); }
+
+  const hist = await fetch(url + '/api/messages?userId=' + userIdB + '&chatId=' + chatId);
+  const histJson = await hist.json();
+  console.log('history ->', hist.status, 'messages:', histJson.messages && histJson.messages.length);
+
+  wsa.close();
+  wsb.close();
 }
 
 (async () => {
   try {
-    let accountId = process.env.CLOUDFLARE_ACCOUNT_ID || await getAccountId();
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || await getAccountId();
     const state = await saveState({ accountId });
     const subdomain = await ensureSubdomain(accountId);
     const kvId = await ensureKV(accountId);

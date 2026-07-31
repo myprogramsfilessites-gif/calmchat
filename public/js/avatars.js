@@ -30,12 +30,14 @@ function avatarSvgNode(key) {
 
 function renderAvatar(container, u, extraClass) {
   container.innerHTML = '';
-  container.className = 'avatar' + (extraClass ? ' ' + extraClass : '') + ' ' + avatarColorClass(u.nickname);
-  if (u.avatar && ICONS[u.avatar]) {
-    container.appendChild(avatarSvgNode(u.avatar));
+  container.className = 'avatar' + (extraClass ? ' ' + extraClass : '') + ' ' + avatarColorClass((u && (u.nick || u.nickname)) || '?');
+  const nick = (u && (u.nick || u.nickname)) || '?';
+  const icon = u && (u.avatar || u.icon);
+  if (icon && ICONS[icon]) {
+    container.appendChild(avatarSvgNode(icon));
   } else {
     const span = document.createElement('span');
-    span.textContent = (u.nickname || '?').charAt(0).toUpperCase();
+    span.textContent = nick.charAt(0).toUpperCase();
     container.appendChild(span);
   }
 }
