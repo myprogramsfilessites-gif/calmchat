@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CalmChat — созвон с другом</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%236366f1'/%3E%3Ctext x='12' y='16.5' font-size='12' text-anchor='middle' fill='white' font-family='sans-serif'%3EC%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app">
+
+    <!-- Регистрация -->
+    <section id="view-register" class="view">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24"><path d="M12 3.5a3.2 3.2 0 0 0-3.2 3.2v5A3.2 3.2 0 0 0 12 14.9a3.2 3.2 0 0 0 3.2-3.2v-5A3.2 3.2 0 0 0 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0M12 18.1v2.6M9 20.7h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <h1>CalmChat</h1>
+        <p class="sub">Созвон с другом без паролей</p>
+      </div>
+
+      <div id="avatar-preview" class="avatar big"></div>
+
+      <label class="field-label" for="nickname-input">Твой ник</label>
+      <input id="nickname-input" class="input" maxlength="20" placeholder="Например, Вася" autocomplete="off">
+      <p id="register-error" class="error"></p>
+
+      <div class="icon-grid" id="icon-grid"></div>
+      <p class="hint">Выбери иконку для кружка. Не выберешь — будет первая буква ника.</p>
+
+      <button id="register-btn" class="btn primary big">Войти</button>
+    </section>
+
+    <!-- Лобби -->
+    <section id="view-lobby" class="view hidden">
+      <div class="lobby-top">
+        <div id="lobby-avatar" class="avatar"></div>
+        <div class="lobby-who">
+          <div class="lobby-nick" id="lobby-nick"></div>
+          <div class="lobby-hint">Создай комнату или войди по коду</div>
+        </div>
+        <button id="logout-btn" class="btn ghost small">Выйти</button>
+      </div>
+
+      <button id="create-btn" class="btn primary big">Создать комнату</button>
+
+      <div class="divider"><span>или</span></div>
+
+      <label class="field-label" for="room-input">Код комнаты</label>
+      <div class="join-row">
+        <input id="room-input" class="input" placeholder="CXXXXXXX" autocomplete="off" autocapitalize="characters">
+        <button id="join-btn" class="btn accent big">Войти</button>
+      </div>
+      <p id="lobby-error" class="error"></p>
+    </section>
+
+    <!-- Комната -->
+    <section id="view-room" class="view hidden">
+      <div class="room-header">
+        <span class="room-label">Код звонка</span>
+        <div class="room-code-row">
+          <span id="room-code" class="room-code"></span>
+          <button id="copy-btn" class="btn ghost small" title="Скопировать">Копировать</button>
+        </div>
+        <span class="status" id="conn-status">Подключение…</span>
+      </div>
+
+      <div id="participants" class="participants"></div>
+
+      <div class="controls">
+        <button id="mic-btn" class="ctl" title="Микрофон">
+          <span class="ctl-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 3.5a3.2 3.2 0 0 0-3.2 3.2v5A3.2 3.2 0 0 0 12 14.9a3.2 3.2 0 0 0 3.2-3.2v-5A3.2 3.2 0 0 0 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0M12 18.1v2.6M9 20.7h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span class="ctl-label">Микрофон</span>
+        </button>
+        <button id="speaker-btn" class="ctl" title="Наушники">
+          <span class="ctl-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 10.5h2.2v5H4a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2zM20 10.5h-2.2v5H20a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M6.2 11.5V10a5.8 5.8 0 0 1 11.6 0v1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span class="ctl-label">Наушники</span>
+        </button>
+        <button id="leave-btn" class="ctl danger" title="Выйти из звонка">
+          <span class="ctl-icon">
+            <svg viewBox="0 0 24 24"><path d="M7.5 6.5C5.6 8.4 4.5 10.7 4.5 13a7.5 7.5 0 0 0 15 0c0-2.3-1.1-4.6-3-6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 3v10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span class="ctl-label">Выйти</span>
+        </button>
+      </div>
+      <p id="room-error" class="error"></p>
+    </section>
+
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
