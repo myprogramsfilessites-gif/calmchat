@@ -3,7 +3,6 @@ services:
     name: calmchat
     runtime: node
     plan: free
-    nodeVersion: 24
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
