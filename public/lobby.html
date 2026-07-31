@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CalmChat — комнаты</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%236366f1'/%3E%3Ctext x='12' y='16.5' font-size='12' text-anchor='middle' fill='white' font-family='sans-serif'%3EC%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app">
+
+    <section id="lobby" class="card">
+      <div class="lobby-top">
+        <div id="lobby-avatar" class="avatar"></div>
+        <div class="lobby-who">
+          <div class="lobby-nick" id="lobby-nick"></div>
+          <div class="lobby-hint">Создай комнату или войди по коду</div>
+        </div>
+        <button id="logout-btn" class="btn ghost small">Выйти</button>
+      </div>
+
+      <button id="create-btn" class="btn primary big">Создать комнату</button>
+
+      <div class="divider"><span>или</span></div>
+
+      <label class="field-label" for="room-input">Код комнаты</label>
+      <div class="join-row">
+        <input id="room-input" class="input" placeholder="CXXXXXXX" autocomplete="off" autocapitalize="characters">
+        <button id="join-btn" class="btn accent big">Войти</button>
+      </div>
+      <p id="lobby-error" class="error"></p>
+    </section>
+
+  </div>
+
+  <script src="config.js"></script>
+  <script src="js/avatars.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/lobby.js"></script>
+</body>
+</html>

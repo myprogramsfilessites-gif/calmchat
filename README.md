@@ -24,6 +24,30 @@ npm start
 
 Данные хранятся в `data/calmchat.db` (SQLite, встроенный в Node.js 22.5+). Если SQLite недоступен — автоматически используется `data/db.json`.
 
+## Структура
+
+```
+calmchat/
+├── server.js          # HTTP API + WebSocket-сервер сигналинга
+├── db.js              # Хранилище (SQLite / JSON-фолбэк)
+├── render.yaml        # Blueprint для деплоя бэкенда на Render
+└── public/            # Фронтенд (разворачивается на GitHub Pages)
+    ├── index.html     # Страница регистрации (ник + иконка)
+    ├── lobby.html     # Страница комнат (создать / войти по коду)
+    ├── room.html      # Страница звонка (WebRTC, mute/deaf)
+    ├── style.css
+    ├── config.js      # Настройка адресов бэкенда
+    └── js/
+        ├── avatars.js # SVG-иконки и отрисовка кружков-аватаров
+        ├── auth.js    # Сессия пользователя (localStorage)
+        ├── api.js     # Обёртка над HTTP API
+        ├── register.js
+        ├── lobby.js
+        └── room.js    # WebRTC-логика звонка
+```
+
+Сессия сохраняется в `localStorage` — после обновления страницы пользователь остаётся в своём аккаунте, а в комнату возвращается автоматически.
+
 ## Деплой на GitHub
 
 1. Фронтенд разворачивается на GitHub Pages автоматически через `Actions` при пуше в `main`.
