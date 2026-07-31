@@ -167,7 +167,7 @@ async function apiSendRequest(env, body) {
   const req = { from, to, createdAt: Date.now() };
   await env.KV.put('req:' + from + ':' + to, JSON.stringify(req));
   const fromUser = await getUser(env, from);
-  notifyUser(env, to, { type: 'request', request: { from, fromUser: publicUser(fromUser), createdAt: req.createdAt } });
+  await notifyUser(env, to, { type: 'request', request: { from, fromUser: publicUser(fromUser), createdAt: req.createdAt } });
   return json(200, { ok: true });
 }
 
@@ -206,9 +206,11 @@ async function apiAcceptRequest(env, body) {
   }
   const fromUser = await getUser(env, from);
   const toUser = await getUser(env, to);
-  notifyUser(env, from, { type: 'chat-created', chatId, other: publicUser(toUser) });
-  notifyUser(env, to, { type: 'chat-created', chatId, other: publicUser(fromUser) });
-  return json(200, { chat: { id: chatId, other: publicUser(fromUser) } });
+  const chatForFrom = { id: chatId, other: publicUser(toUser), last: null };
+  const chatForTo = { id: chatId, other: publicUser(fromUser), last: null };
+  await notifyUser(env, from, { type: 'chat-created', chat: chatForFrom });
+  await notifyUser(env, to, { type: 'chat-created', chat: chatForTo });
+  return json(200, { chat: chatForTo });
 }
 
 async function apiDeclineRequest(env, body) {
@@ -266,7 +268,7 @@ async function apiDeleteChat(env, body) {
     });
   } catch (e) {}
   const otherId = chat.a === userId ? chat.b : chat.a;
-  notifyUser(env, otherId, { type: 'chat-deleted', chatId });
+  await notifyUser(env, otherId, { type: 'chat-deleted', chatId });
   return json(200, { ok: true });
 }
 
@@ -303,7 +305,7 @@ async function apiMedia(env, request, path) {
   if (!rawChat) return new Response('not found', { status: 404 });
   const chat = JSON.parse(rawChat);
   if (chat.a !== userId && chat.b !== userId) return new Response('forbidden', { status: 403 });
-  const obj = await env.KV.get(key);
+  const obj = await env.KV.get(key, 'arrayBuffer');
   if (obj === null) return new Response('not found', { status: 404 });
   const dot = key.lastIndexOf('.');
   const ext = dot === -1 ? '' : key.slice(dot);
@@ -332,6 +334,19 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.webm': 'audio/webm',
+  '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.mov': 'video/quicktime',
+  '.bin': 'application/octet-stream',
 };
 
 async function serveStatic(env, url) {
@@ -438,7 +453,8 @@ export class Hub {
     if (msg.type === 'msg') {
       await this.storeMessage(userId, msg);
     } else if (msg.type === 'call-offer' || msg.type === 'call-answer' || msg.type === 'call-ice' ||
-               msg.type === 'call-decline' || msg.type === 'call-end') {
+               msg.type === 'call-decline' || msg.type === 'call-end' ||
+               msg.type === 'call-reneg-offer' || msg.type === 'call-reneg-answer') {
       const target = this.sockets.get(String(msg.to || ''));
       if (target && target.readyState === 1) {
         target.send(JSON.stringify({ type: msg.type, from: userId, chatId: String(msg.chatId || ''), data: msg.data || null }));
@@ -460,9 +476,9 @@ export class Hub {
     if (type === 'text' && !text) return;
     if (type !== 'text' && !mediaKey) return;
     const ts = Date.now();
-    let seq = Date.now() % 100000000;
+    let seq = 1;
     try {
-      const cur = this.state.storage.sql.exec('SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_id=?', chatId).toArray();
+      const cur = this.state.storage.sql.exec('SELECT COALESCE(MAX(seq),0) AS m FROM messages WHERE chat_id=?', chatId).raw().toArray();
       seq = (cur && cur[0] && cur[0][0] != null) ? Number(cur[0][0]) + 1 : 1;
     } catch (e) {}
     const row = { seq, from: userId, type, text, mediaKey, mediaType, ts };
@@ -496,7 +512,10 @@ export class Hub {
         'SELECT seq, from_id, type, text, media_key, media_type, ts FROM messages WHERE chat_id=? AND seq>? ORDER BY seq ASC LIMIT 200',
         chatId, afterSeq
       ).toArray();
-      const messages = cur.map((r) => ({ seq: r[0], from: r[1], type: r[2], text: r[3], mediaKey: r[4], mediaType: r[5], ts: r[6] }));
+      const messages = cur.map((r) => ({
+        seq: r.seq, from: r.from_id, type: r.type, text: r.text,
+        mediaKey: r.media_key, mediaType: r.media_type, ts: r.ts,
+      }));
       return json(200, { messages });
     } catch (e) {
       return json(200, { messages: [] });
@@ -511,7 +530,9 @@ export class Hub {
         chatId
       ).toArray();
       const row = cur[0];
-      const last = row ? { seq: row[0], from: row[1], type: row[2], text: row[3], mediaKey: row[4], mediaType: row[5], ts: row[6] } : null;
+      const last = row
+        ? { seq: row.seq, from: row.from_id, type: row.type, text: row.text, mediaKey: row.media_key, mediaType: row.media_type, ts: row.ts }
+        : null;
       return json(200, { last });
     } catch (e) {
       return json(200, { last: null });

@@ -34,6 +34,14 @@ const Call = (() => {
     $('call-status').textContent = status;
   }
 
+  function hide() {
+    $('call-overlay').hidden = true;
+    $('call-status').textContent = '';
+    $('call-video-wrap').hidden = true;
+    $('call-local-video').srcObject = null;
+    $('call-remote-video').srcObject = null;
+  }
+
   function setActiveUI() {
     $('call-incoming-actions').hidden = true;
     $('call-actions').hidden = false;
@@ -181,6 +189,19 @@ const Call = (() => {
       if (pc && msg.data && msg.data.candidate) {
         try { await pc.addIceCandidate(msg.data.candidate); } catch (e) {}
       }
+    } else if (msg.type === 'call-reneg-offer') {
+      if (pc && msg.data && msg.data.sdp) {
+        try {
+          await pc.setRemoteDescription({ type: 'offer', sdp: msg.data.sdp });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          send({ type: 'call-reneg-answer', to: otherId, chatId, data: { sdp: pc.localDescription.sdp } });
+        } catch (e) {}
+      }
+    } else if (msg.type === 'call-reneg-answer') {
+      if (pc && msg.data && msg.data.sdp && pc.signalingState !== 'stable') {
+        try { await pc.setRemoteDescription({ type: 'answer', sdp: msg.data.sdp }); } catch (e) {}
+      }
     } else if (msg.type === 'call-decline') {
       $('call-status').textContent = 'Звонок отклонён';
       setTimeout(() => cleanup(false), 1200);
@@ -196,11 +217,55 @@ const Call = (() => {
     updateMediaButtons();
   }
 
-  function toggleCam() {
-    if (!videoMode) return;
+  async function renegotiate() {
+    if (!pc || pc.signalingState !== 'stable' || pc.connectionState !== 'connected') return;
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send({ type: 'call-reneg-offer', to: otherId, chatId, data: { sdp: pc.localDescription.sdp } });
+    } catch (e) {}
+  }
+
+  async function toggleCam() {
     camOn = !camOn;
-    if (localStream) localStream.getVideoTracks().forEach((t) => (t.enabled = camOn));
     updateMediaButtons();
+    const vtracks = localStream ? localStream.getVideoTracks() : [];
+    if (camOn) {
+      if (vtracks.length === 0) {
+        try {
+          const vstream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          });
+          const vt = vstream.getVideoTracks()[0];
+          if (!localStream) {
+            localStream = new MediaStream();
+          }
+          localStream.addTrack(vt);
+          if (pc) pc.addTrack(vt, localStream);
+          $('call-local-video').srcObject = localStream;
+          $('call-video-wrap').hidden = false;
+          await renegotiate();
+        } catch (e) {
+          camOn = false;
+          updateMediaButtons();
+        }
+      } else {
+        vtracks.forEach((t) => (t.enabled = true));
+        $('call-local-video').srcObject = localStream;
+        $('call-video-wrap').hidden = false;
+      }
+    } else {
+      vtracks.forEach((t) => {
+        if (pc) {
+          const sender = pc.getSenders().find((s) => s.track === t);
+          if (sender) { try { pc.removeTrack(sender); } catch (e) {} }
+        }
+        t.stop();
+        if (localStream) localStream.removeTrack(t);
+      });
+      $('call-video-wrap').hidden = true;
+      $('call-local-video').srcObject = null;
+    }
   }
 
   function cleanup(delay) {

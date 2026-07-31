@@ -338,6 +338,8 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 2
   font-weight: 700;
 }
 .msg.self .voice-play { background: #fff; color: var(--accent); }
+.voice-time { font-size: 13px; font-weight: 600; color: var(--text); min-width: 64px; }
+.msg.self .voice-time { color: #fff; }
 
 .msg-meta { color: var(--muted); font-size: 11px; margin-top: 3px; padding: 0 4px; }
 

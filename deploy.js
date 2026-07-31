@@ -272,7 +272,17 @@ async function testMessages(url, userIdA, userIdB, chatId) {
   const okA = await waitConnected(wsa);
   const okB = await waitConnected(wsb);
   console.log('WS A connected:', okA, '| WS B connected:', okB);
-  if (okA !== 'open' || okB !== 'open') { wsa.close(); wsb.close(); throw new Error('WS connect failed'); }
+  if (okA !== 'open' || okB !== 'open') {
+    wsa.close(); wsb.close();
+    for (let i = 1; i <= 3; i++) {
+      console.log('WS connect failed, retrying in 2s...');
+      await new Promise((r) => setTimeout(r, 2000));
+      try { await testMessages(url, userIdA, userIdB, chatId); return; } catch (e2) {
+        console.log('retry', i, 'failed:', e2.message);
+      }
+    }
+    throw new Error('WS connect failed');
+  }
 
   const gotByB = new Promise((res) => {
     const t = setTimeout(() => res('timeout'), 15000);

@@ -52,17 +52,23 @@
       toast('Новый запрос от ' + ((msg.request && msg.request.fromUser && msg.request.fromUser.nick) || 'пользователя'));
       refreshRequestsBadge();
     } else if (msg.type === 'chat-created') {
-      toast('Новый чат: ' + ((msg.other && msg.other.nick) || ''));
-      refreshChats();
+      const ch = msg.chat || {};
+      toast('Новый чат: ' + ((ch.other && ch.other.nick) || ''));
+      if (ch.id && !state.chats.find((x) => x.id === ch.id)) {
+        state.chats.unshift({ id: ch.id, other: ch.other || { id: '', nick: '' }, last: null });
+      }
+      renderChatList();
     } else if (msg.type === 'chat-deleted') {
       if (state.activeChatId === msg.chatId) {
         state.activeChatId = null;
         state.activeOther = null;
         showChatPlaceholder();
       }
-      refreshChats();
+      state.chats = state.chats.filter((x) => x.id !== msg.chatId);
+      renderChatList();
     } else if (msg.type === 'call-offer' || msg.type === 'call-answer' || msg.type === 'call-ice' ||
-               msg.type === 'call-decline' || msg.type === 'call-end') {
+               msg.type === 'call-decline' || msg.type === 'call-end' ||
+               msg.type === 'call-reneg-offer' || msg.type === 'call-reneg-answer') {
       Call.handleMessage(msg);
     }
   }
@@ -255,15 +261,28 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'voice-play';
-      btn.textContent = 'Play';
+      btn.textContent = '▶';
+      const time = document.createElement('span');
+      time.className = 'voice-time';
+      time.textContent = '0:00';
       const audio = document.createElement('audio');
+      audio.preload = 'metadata';
       audio.src = mediaUrl(m.mediaKey, user.id);
-      btn.addEventListener('click', () => {
-        if (audio.paused) { audio.play().catch(() => {}); btn.textContent = 'Pause'; }
-        else { audio.pause(); btn.textContent = 'Play'; }
+      const fmt = (s) => {
+        s = Math.max(0, Math.round(s || 0));
+        return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      };
+      audio.addEventListener('loadedmetadata', () => { time.textContent = fmt(audio.duration); });
+      audio.addEventListener('timeupdate', () => {
+        time.textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration);
       });
-      audio.addEventListener('ended', () => { btn.textContent = 'Play'; });
+      btn.addEventListener('click', () => {
+        if (audio.paused) { audio.play().catch(() => {}); btn.textContent = '⏸'; }
+        else { audio.pause(); btn.textContent = '▶'; }
+      });
+      audio.addEventListener('ended', () => { btn.textContent = '▶'; time.textContent = fmt(audio.duration); });
       voice.appendChild(btn);
+      voice.appendChild(time);
       wrap.appendChild(voice);
     } else {
       const bubble = document.createElement('div');
