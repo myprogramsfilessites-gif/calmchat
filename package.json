@@ -1,0 +1,16 @@
+{
+  "name": "calmchat",
+  "version": "1.0.0",
+  "description": "Голосовой чат по WebRTC с подавлением эха (эхоподавление: звук из динамиков не попадает в микрофон)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "peer": "^1.0.2"
+  },
+  "license": "MIT"
+}
