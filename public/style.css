@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 html, body { height: 100%; }
 
@@ -110,6 +111,7 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 2
 .tab.active { background: #fff; color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 
 .auth-card form { display: flex; flex-direction: column; gap: 12px; }
+.auth-card form[hidden] { display: none; }
 
 .auth-success { color: var(--ok); font-size: 15px; margin-top: 14px; text-align: center; }
 
