@@ -113,7 +113,6 @@
       members.set(user.id, { nickname: user.nickname, avatar: user.avatar, muted: false, deaf: false, self: true });
       msg.peers.forEach((p) => members.set(p.userId, Object.assign({}, p)));
       renderParticipants();
-      msg.peers.forEach((p) => connectAndOffer(p.userId));
     } else if (msg.type === 'peer-joined') {
       members.set(msg.peer.userId, Object.assign({}, msg.peer));
       renderParticipants();
@@ -180,6 +179,16 @@
     });
   }
 
+  function updateCallStatus() {
+    const el = $('call-status');
+    if (!el) return;
+    const states = [];
+    pcs.forEach((pc) => states.push(pc.connectionState));
+    if (states.length === 0) { el.textContent = ''; return; }
+    const allConnected = states.every((s) => s === 'connected');
+    el.textContent = allConnected ? 'Звонок активен' : 'Соединение… (' + states.join(', ') + ')';
+  }
+
   function createPC(userId) {
     if (pcs.has(userId)) return pcs.get(userId);
     const pc = new RTCPeerConnection(ICE_CONFIG);
@@ -188,6 +197,7 @@
       if (e.candidate) sendSignal(userId, { type: 'candidate', candidate: e.candidate });
     };
     pc.onconnectionstatechange = () => {
+      updateCallStatus();
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         setTimeout(() => {
           if (pcs.get(userId) === pc && pc.connectionState !== 'connected') pc.restartIce();
@@ -295,6 +305,9 @@
   $('mic-btn').addEventListener('click', toggleMute);
   $('speaker-btn').addEventListener('click', toggleDeaf);
   $('leave-btn').addEventListener('click', leaveRoom);
+  document.addEventListener('pointerdown', () => {
+    remoteEls.forEach((el) => { if (el.paused) el.play().catch(() => {}); });
+  });
   $('copy-btn').addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(roomCode);
