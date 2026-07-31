@@ -55,7 +55,8 @@ GitHub Pages и Render часто блокируются в российских
 ```
 calmchat/
 ├── worker.js        # Cloudflare Worker: API + WebSocket-сигналинг (Durable Objects)
-├── wrangler.toml    # Конфиг Cloudflare: статика, KV, Durable Objects
+├── deploy.js        # Деплой через Cloudflare API (без wrangler): KV, статика, worker
+├── wrangler.toml    # Конфиг Cloudflare для тех, у кого есть wrangler на ПК
 ├── server.js        # Локальный Node-сервер (для разработки)
 ├── db.js            # Хранилище для локальной версии
 └── public/          # Фронтенд (одна и та же папка для обоих вариантов)
@@ -66,16 +67,15 @@ calmchat/
 1. Создай аккаунт Cloudflare: https://dash.cloudflare.com/sign-up
 2. Получи API-токен: https://dash.cloudflare.com/profile/api-tokens
    → **Create Token** → шаблон **Edit Cloudflare Workers** → **Continue** → **Create Token** → скопируй токен
-3. Пришли мне токен — я сам создам KV-хранилище и запущу деплой.
-
-### Деплой (команды)
+3. Пришли мне токен — я сам создам KV-хранилище, загружу статику и запущу деплой командой:
 
 ```bash
-npm i -D wrangler
-npx wrangler kv namespace create KV   # получить id KV-хранилища
-# вписать id в wrangler.toml вместо REPLACE_WITH_KV_ID
-CLOUDFLARE_API_TOKEN=xxxx CLOUDFLARE_ACCOUNT_ID=xxxx npx wrangler deploy
+CLOUDFLARE_API_TOKEN=xxxx node deploy.js
 ```
+
+Скрипт сам определит account id (или передай `CLOUDFLARE_ACCOUNT_ID=xxxx`), создаст/подхватит KV, загрузит файлы из `public/` в KV, зальёт worker и проверит всё через API и WebSocket.
+
+> Альтернатива на ПК: `npm i -D wrangler` → `npx wrangler kv namespace create KV` → вписать id в `wrangler.toml` → `npx wrangler deploy`.
 
 После деплоя адрес вида `https://calmchat.<поддомен>.workers.dev` — он и для фронтенда, и для API, и для WebSocket. Ничего в `public/config.js` менять не нужно (всё на одном домене).
 
