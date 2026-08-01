@@ -103,6 +103,7 @@
     <div class="settings-tabs">
       <button class="settings-tab active" id="tab-profile" type="button">Профиль</button>
       <button class="settings-tab" id="tab-privacy" type="button">Приватность</button>
+      <button class="settings-tab" id="tab-media" type="button">Медиа</button>
     </div>
 
     <div id="tab-profile-content">
@@ -138,6 +139,24 @@
         </div>
         <button class="switch" id="dnd-toggle" type="button" aria-pressed="false"><span></span></button>
       </div>
+    </div>
+
+    <div id="tab-media-content" hidden>
+      <div class="dnd-row">
+        <div>
+          <div class="dnd-title">Микрофон</div>
+          <div class="dnd-sub">Устройство записи для звонков</div>
+        </div>
+      </div>
+      <select class="media-select" id="mic-select"></select>
+      <div class="dnd-row">
+        <div>
+          <div class="dnd-title">Динамик</div>
+          <div class="dnd-sub">Куда выводить звук собеседника</div>
+        </div>
+      </div>
+      <select class="media-select" id="speaker-select"></select>
+      <p class="modal-sub">Звук настраивается автоматически при звонке. Этот список — на случай, если нужно поменять вручную.</p>
     </div>
 
     <div class="modal-actions">

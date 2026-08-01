@@ -24,9 +24,97 @@ const Call = (() => {
   let micOn = true;
   let camOn = false;
 
+  const MEDIA_KEY = 'cc-media';
+
   function send(obj) {
     const c = window.__chat;
     if (c) c.wsSend(obj);
+  }
+
+  function loadMediaPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem(MEDIA_KEY) || '{}');
+      return { mic: p.mic || '', speaker: p.speaker || '' };
+    } catch (e) {
+      return { mic: '', speaker: '' };
+    }
+  }
+
+  function saveMediaPrefs(p) {
+    localStorage.setItem(MEDIA_KEY, JSON.stringify({ mic: p.mic || '', speaker: p.speaker || '' }));
+  }
+
+  let activeSpeaker = '';
+
+  function normLabel(s) {
+    return (s || '')
+      .toLowerCase()
+      .replace(/[\(\[\]\)]/g, ' ')
+      .replace(/[0-9]/g, ' ')
+      .replace(/\b(microphone|mic|speakers?|speaker|headset|headphones?|headphone|audio|sound|device|input|output|monitor|usb)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  async function findSpeakerForMic(micId) {
+    if (!micId) return '';
+    let devices = [];
+    try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (e) { return ''; }
+    const mics = devices.filter((d) => d.kind === 'audioinput');
+    const spks = devices.filter((d) => d.kind === 'audiooutput');
+    if (spks.length <= 1) return '';
+    const mic = mics.find((d) => d.deviceId === micId);
+    if (!mic) return '';
+    const key = normLabel(mic.label);
+    if (!key) return '';
+    const exact = spks.find((d) => normLabel(d.label) === key);
+    if (exact) return exact.deviceId;
+    const partial = spks.find((d) => {
+      const k = normLabel(d.label);
+      return !!k && (k.includes(key) || key.includes(k));
+    });
+    return partial ? partial.deviceId : '';
+  }
+
+  async function applySink(el) {
+    const target = el || $('call-remote-video');
+    if (!target || typeof target.setSinkId !== 'function') return;
+    if (!activeSpeaker) return;
+    try { await target.setSinkId(activeSpeaker); } catch (e) {}
+  }
+
+  async function populateMediaDevices() {
+    const micSel = $('mic-select');
+    const spkSel = $('speaker-select');
+    if (!micSel || !spkSel) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      micSel.innerHTML = '<option value="">Устройства не поддерживаются</option>';
+      spkSel.innerHTML = '<option value="">Устройства не поддерживаются</option>';
+      return;
+    }
+    try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) {}
+    let devices = [];
+    try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (e) { devices = []; }
+    const mics = devices.filter((d) => d.kind === 'audioinput');
+    const spks = devices.filter((d) => d.kind === 'audiooutput');
+    const prefs = loadMediaPrefs();
+    fillSelect(micSel, mics, prefs.mic, 'Микрофон по умолчанию');
+    fillSelect(spkSel, spks, prefs.speaker, 'Динамик по умолчанию');
+  }
+
+  function fillSelect(sel, list, current, defLabel) {
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = defLabel;
+    sel.appendChild(def);
+    list.forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || (d.kind === 'audioinput' ? 'Микрофон ' + (i + 1) : 'Динамик ' + (i + 1));
+      sel.appendChild(o);
+    });
+    sel.value = list.some((d) => d.deviceId === current) ? current : '';
   }
 
   function show(status) {
@@ -89,11 +177,30 @@ const Call = (() => {
   }
 
   async function getMedia(video) {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+    const prefs = loadMediaPrefs();
+    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const constraints = () => ({
+      audio: { ...base },
       video: video ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false,
     });
+    let stream;
+    try {
+      if (prefs.mic) {
+        stream = await navigator.mediaDevices.getUserMedia({ ...constraints(), audio: { ...base, deviceId: { exact: prefs.mic } } });
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia(constraints());
+      }
+    } catch (e) {
+      if (prefs.mic) stream = await navigator.mediaDevices.getUserMedia(constraints());
+      else throw e;
+    }
     localStream = stream;
+    activeSpeaker = prefs.speaker || '';
+    if (!activeSpeaker) {
+      const track = stream.getAudioTracks()[0];
+      const micId = track && track.getSettings ? (track.getSettings().deviceId || '') : '';
+      activeSpeaker = await findSpeakerForMic(micId);
+    }
     if (video) {
       $('call-video-wrap').hidden = false;
       $('call-local-video').srcObject = stream;
@@ -114,7 +221,14 @@ const Call = (() => {
       }
     };
     pc.ontrack = (e) => {
-      if (e.streams[0]) $('call-remote-video').srcObject = e.streams[0];
+      const videoEl = $('call-remote-video');
+      if (!videoEl) return;
+      if (!videoEl.srcObject) videoEl.srcObject = new MediaStream();
+      videoEl.srcObject.addTrack(e.track);
+      if (e.track.kind === 'audio') {
+        applySink(videoEl);
+        try { videoEl.play(); } catch (err) {}
+      }
     };
     if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
     return pc;
@@ -300,6 +414,7 @@ const Call = (() => {
     pendingOffer = null;
     otherId = null;
     chatId = null;
+    activeSpeaker = '';
     bannerHide();
     if (delay) setTimeout(hide, 1000);
     else hide();
@@ -320,5 +435,20 @@ const Call = (() => {
   $('call-banner-accept-btn').addEventListener('click', accept);
   $('call-banner-reject-btn').addEventListener('click', decline);
 
-  return { start, handleMessage, dnd };
+  const micSel = $('mic-select');
+  const spkSel = $('speaker-select');
+  if (micSel) micSel.addEventListener('change', () => {
+    const p = loadMediaPrefs();
+    p.mic = micSel.value;
+    saveMediaPrefs(p);
+  });
+  if (spkSel) spkSel.addEventListener('change', () => {
+    const p = loadMediaPrefs();
+    p.speaker = spkSel.value;
+    saveMediaPrefs(p);
+    activeSpeaker = spkSel.value;
+    applySink($('call-remote-video'));
+  });
+
+  return { start, handleMessage, dnd, populateMediaDevices, loadMediaPrefs };
 })();

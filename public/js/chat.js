@@ -628,10 +628,16 @@
 
   function switchSettingsTab(tab) {
     const profile = tab === 'profile';
+    const privacy = tab === 'privacy';
     $('tab-profile').classList.toggle('active', profile);
-    $('tab-privacy').classList.toggle('active', !profile);
+    $('tab-privacy').classList.toggle('active', privacy);
+    $('tab-media').classList.toggle('active', tab === 'media');
     $('tab-profile-content').hidden = !profile;
-    $('tab-privacy-content').hidden = profile;
+    $('tab-privacy-content').hidden = !privacy;
+    $('tab-media-content').hidden = tab !== 'media';
+    if (tab === 'media') {
+      Call.populateMediaDevices().catch(() => {});
+    }
   }
 
   async function setDnd(value) {
@@ -683,6 +689,7 @@
   $('delete-account-btn').addEventListener('click', deleteAccount);
   $('tab-profile').addEventListener('click', () => switchSettingsTab('profile'));
   $('tab-privacy').addEventListener('click', () => switchSettingsTab('privacy'));
+  $('tab-media').addEventListener('click', () => switchSettingsTab('media'));
   $('dnd-toggle').addEventListener('click', () => {
     setDnd($('dnd-toggle').getAttribute('aria-pressed') !== 'true');
   });

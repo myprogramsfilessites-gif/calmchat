@@ -424,6 +424,15 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 2
 .dnd-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
 .dnd-title { font-weight: 600; font-size: 15px; }
 .dnd-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.media-select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 14px;
+  color: var(--text);
+}
 .switch {
   position: relative;
   width: 48px;
