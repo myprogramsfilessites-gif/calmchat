@@ -57,6 +57,17 @@ const Call = (() => {
     $('call-nick').textContent = other ? other.nick : '';
   }
 
+  function bannerShow(other, video) {
+    renderAvatar($('call-banner-avatar'), other);
+    $('call-banner-nick').textContent = other ? other.nick : '';
+    $('call-banner-sub').textContent = video ? 'Видеозвонок' : 'Входящий звонок';
+    $('call-banner').hidden = false;
+  }
+
+  function bannerHide() {
+    $('call-banner').hidden = true;
+  }
+
   function startTimer() {
     startTs = Date.now();
     clearInterval(timer);
@@ -127,7 +138,7 @@ const Call = (() => {
       const p = createPC();
       const offer = await p.createOffer();
       await p.setLocalDescription(offer);
-      send({ type: 'call-offer', to: otherId, chatId, data: { sdp: p.localDescription.sdp, video } });
+      send({ type: 'call-offer', to: otherId, chatId, data: { sdp: p.localDescription.sdp, video, name: (other && other.nick) || '' } });
     } catch (e) {
       $('call-status').textContent = 'Нет доступа к микрофону или камере';
       cleanup(true);
@@ -135,6 +146,7 @@ const Call = (() => {
   }
 
   async function accept() {
+    bannerHide();
     outgoing = false;
     setActiveUI();
     show('Соединение…');
@@ -172,14 +184,19 @@ const Call = (() => {
       pendingOffer = msg.data;
       outgoing = false;
       const c = window.__chat && window.__chat.state.chats.find((x) => x.id === chatId);
-      const other = c ? c.other : { id: msg.from, nick: 'Звонок' };
+      const other = c ? c.other : { id: msg.from, nick: (msg.data && msg.data.name) || 'Звонок' };
       renderNames(other);
       micOn = true;
       camOn = videoMode;
       updateMediaButtons();
       $('call-video-wrap').hidden = !videoMode;
-      show('Входящий звонок…');
-      setIncomingUI();
+      const st = window.__chat && window.__chat.state;
+      if (st && st.activeChatId === chatId) {
+        show('Входящий звонок…');
+        setIncomingUI();
+      } else {
+        bannerShow(other, videoMode);
+      }
     } else if (msg.type === 'call-answer') {
       if (pc && pc.signalingState !== 'stable') {
         await pc.setRemoteDescription({ type: 'answer', sdp: msg.data.sdp });
@@ -283,8 +300,16 @@ const Call = (() => {
     pendingOffer = null;
     otherId = null;
     chatId = null;
+    bannerHide();
     if (delay) setTimeout(hide, 1000);
     else hide();
+  }
+
+  function dnd() {
+    if (outgoing && (!pc || pc.connectionState !== 'connected')) {
+      $('call-status').textContent = 'Режим «Не беспокоить»';
+      setTimeout(() => cleanup(true), 2000);
+    }
   }
 
   $('call-mic-btn').addEventListener('click', toggleMic);
@@ -292,6 +317,8 @@ const Call = (() => {
   $('call-hangup-btn').addEventListener('click', hangup);
   $('call-decline-btn').addEventListener('click', decline);
   $('call-accept-btn').addEventListener('click', accept);
+  $('call-banner-accept-btn').addEventListener('click', accept);
+  $('call-banner-reject-btn').addEventListener('click', decline);
 
-  return { start, handleMessage };
+  return { start, handleMessage, dnd };
 })();

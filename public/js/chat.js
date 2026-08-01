@@ -12,6 +12,7 @@
     socket: null,
     reconnectAttempts: 0,
     leaving: false,
+    lastPong: 0,
     pendingEls: [],
   };
 
@@ -27,6 +28,7 @@
     state.socket.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'pong') state.lastPong = Date.now();
       handleWsMessage(msg);
     };
     state.socket.onclose = () => {
@@ -35,6 +37,20 @@
         setTimeout(connectSocket, 3000);
       }
     };
+  }
+
+  function startHeartbeat() {
+    setInterval(() => {
+      if (!state.socket) return;
+      if (state.socket.readyState === 1) {
+        if (state.lastPong && Date.now() - state.lastPong > 30000) {
+          try { state.socket.close(); } catch (e) {}
+          return;
+        }
+        state.lastPong = Date.now();
+        try { state.socket.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+      }
+    }, 15000);
   }
 
   function wsSend(obj) {
@@ -51,6 +67,20 @@
     } else if (msg.type === 'request') {
       toast('Новый запрос от ' + ((msg.request && msg.request.fromUser && msg.request.fromUser.nick) || 'пользователя'));
       refreshRequestsBadge();
+      if (!$('requests-modal').hidden) renderRequests();
+    } else if (msg.type === 'user-updated') {
+      const u = msg.user || {};
+      if (!u.id) return;
+      state.chats.forEach((c) => {
+        if (c.other && c.other.id === u.id) { c.other.nick = u.nick; c.other.avatar = u.avatar; }
+      });
+      renderChatList();
+      if (state.activeOther && state.activeOther.id === u.id) {
+        state.activeOther.nick = u.nick;
+        state.activeOther.avatar = u.avatar;
+        renderAvatar($('chat-avatar'), state.activeOther);
+        $('chat-nick').textContent = u.nick;
+      }
     } else if (msg.type === 'chat-created') {
       const ch = msg.chat || {};
       toast('Новый чат: ' + ((ch.other && ch.other.nick) || ''));
@@ -66,6 +96,10 @@
       }
       state.chats = state.chats.filter((x) => x.id !== msg.chatId);
       renderChatList();
+    } else if (msg.type === 'call-dnd') {
+      const name = msg.callerName || (state.activeOther && state.activeOther.nick) || '';
+      toast(name ? 'У «' + name + '» включён режим «Не беспокоить»' : 'Пользователь не может принять звонок');
+      Call.dnd();
     } else if (msg.type === 'call-offer' || msg.type === 'call-answer' || msg.type === 'call-ice' ||
                msg.type === 'call-decline' || msg.type === 'call-end' ||
                msg.type === 'call-reneg-offer' || msg.type === 'call-reneg-answer') {
@@ -557,6 +591,8 @@
     buildAvatarPicker();
     delCaptcha = makeCaptcha();
     $('del-captcha').textContent = delCaptcha;
+    $('dnd-toggle').setAttribute('aria-pressed', String(!!user.dnd));
+    switchSettingsTab('profile');
     openModal('profile-modal');
   }
 
@@ -588,6 +624,27 @@
     if (state.socket) { try { state.socket.close(); } catch (e) {} }
     clearSession();
     location.replace('index.html');
+  }
+
+  function switchSettingsTab(tab) {
+    const profile = tab === 'profile';
+    $('tab-profile').classList.toggle('active', profile);
+    $('tab-privacy').classList.toggle('active', !profile);
+    $('tab-profile-content').hidden = !profile;
+    $('tab-privacy-content').hidden = profile;
+  }
+
+  async function setDnd(value) {
+    const toggle = $('dnd-toggle');
+    toggle.setAttribute('aria-pressed', String(!!value));
+    try {
+      const d = await api('POST', '/api/me/dnd', { userId: user.id, dnd: !!value });
+      user.dnd = !!d.user.dnd;
+      saveSession(user);
+    } catch (e) {
+      toggle.setAttribute('aria-pressed', String(!value));
+      toast(e.message);
+    }
   }
 
   async function deleteAccount() {
@@ -624,6 +681,11 @@
   $('save-profile-btn').addEventListener('click', saveProfile);
   $('logout-btn').addEventListener('click', doLogout);
   $('delete-account-btn').addEventListener('click', deleteAccount);
+  $('tab-profile').addEventListener('click', () => switchSettingsTab('profile'));
+  $('tab-privacy').addEventListener('click', () => switchSettingsTab('privacy'));
+  $('dnd-toggle').addEventListener('click', () => {
+    setDnd($('dnd-toggle').getAttribute('aria-pressed') !== 'true');
+  });
   $('send-btn').addEventListener('click', sendText);
   $('msg-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendText(); });
   $('attach-btn').addEventListener('click', () => $('file-input').click());
@@ -648,15 +710,21 @@
   (async function init() {
     renderProfile();
     connectSocket();
+    startHeartbeat();
     await Promise.all([refreshChats(), refreshRequestsBadge()]);
     try {
       const me = await api('GET', '/api/me?userId=' + encodeURIComponent(user.id));
-      if (me.user && (me.user.nick !== user.nick || me.user.avatar !== user.avatar)) {
+      if (me.user) {
+        const changed = me.user.nick !== user.nick || me.user.avatar !== user.avatar || !!me.user.dnd !== !!user.dnd;
         user.nick = me.user.nick;
         user.avatar = me.user.avatar;
-        saveSession(user);
-        renderProfile();
-        refreshChats();
+        user.dnd = !!me.user.dnd;
+        $('dnd-toggle').setAttribute('aria-pressed', String(user.dnd));
+        if (changed) {
+          saveSession(user);
+          renderProfile();
+          refreshChats();
+        }
       }
     } catch (e) {
       clearSession();

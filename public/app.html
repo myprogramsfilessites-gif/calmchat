@@ -100,32 +100,67 @@
 
   <div class="modal" id="profile-modal" hidden>
     <div class="modal-title">Настройки</div>
-    <div class="avatar big center" id="profile-modal-avatar"></div>
-    <p class="modal-sub center">Твой ID: <b id="profile-modal-id"></b></p>
-    <label class="field-label" for="nick-input">Ник</label>
-    <input id="nick-input" placeholder="Ник" autocomplete="off" maxlength="24">
-    <p class="error" id="nick-error"></p>
-    <label class="field-label" for="avatar-picker">Аватар</label>
-    <div class="avatar-picker" id="avatar-picker"></div>
+    <div class="settings-tabs">
+      <button class="settings-tab active" id="tab-profile" type="button">Профиль</button>
+      <button class="settings-tab" id="tab-privacy" type="button">Приватность</button>
+    </div>
 
-    <div class="settings-sep"></div>
+    <div id="tab-profile-content">
+      <div class="avatar big center" id="profile-modal-avatar"></div>
+      <p class="modal-sub center">Твой ID: <b id="profile-modal-id"></b></p>
+      <label class="field-label" for="nick-input">Ник</label>
+      <input id="nick-input" placeholder="Ник" autocomplete="off" maxlength="24">
+      <p class="error" id="nick-error"></p>
+      <label class="field-label" for="avatar-picker">Аватар</label>
+      <div class="avatar-picker" id="avatar-picker"></div>
 
-    <label class="field-label">Аккаунт</label>
-    <button class="btn ghost block" id="logout-btn" type="button">Выйти из аккаунта</button>
+      <div class="settings-sep"></div>
 
-    <div class="danger-zone">
-      <label class="field-label danger-label">Удаление аккаунта</label>
-      <p class="modal-sub">Удаление навсегда: все чаты, сообщения и медиа. Отменить нельзя.</p>
-      <p class="modal-sub">Для подтверждения введи код: <b id="del-captcha" class="captcha"></b></p>
-      <input id="del-captcha-input" placeholder="Код из картинки" autocomplete="off">
-      <input id="del-password-input" type="password" placeholder="Твой пароль" autocomplete="off">
-      <p class="error" id="del-error"></p>
-      <button class="btn danger block" id="delete-account-btn" type="button">Удалить аккаунт</button>
+      <label class="field-label">Аккаунт</label>
+      <button class="btn ghost block" id="logout-btn" type="button">Выйти из аккаунта</button>
+
+      <div class="danger-zone">
+        <label class="field-label danger-label">Удаление аккаунта</label>
+        <p class="modal-sub">Удаление навсегда: все чаты, сообщения и медиа. Отменить нельзя.</p>
+        <p class="modal-sub">Для подтверждения введи код: <b id="del-captcha" class="captcha"></b></p>
+        <input id="del-captcha-input" placeholder="Код из картинки" autocomplete="off">
+        <input id="del-password-input" type="password" placeholder="Твой пароль" autocomplete="off">
+        <p class="error" id="del-error"></p>
+        <button class="btn danger block" id="delete-account-btn" type="button">Удалить аккаунт</button>
+      </div>
+    </div>
+
+    <div id="tab-privacy-content" hidden>
+      <div class="dnd-row">
+        <div>
+          <div class="dnd-title">Не беспокоить</div>
+          <div class="dnd-sub">Звонящие увидят, что ты не можешь принять звонок</div>
+        </div>
+        <button class="switch" id="dnd-toggle" type="button" aria-pressed="false"><span></span></button>
+      </div>
     </div>
 
     <div class="modal-actions">
       <button class="btn ghost" data-close="profile-modal" type="button">Закрыть</button>
       <button class="btn primary" id="save-profile-btn" type="button">Сохранить</button>
+    </div>
+  </div>
+
+  <div class="call-banner" id="call-banner" hidden>
+    <div class="call-banner-info">
+      <div class="avatar" id="call-banner-avatar"></div>
+      <div>
+        <div class="call-banner-text">Вам звонит <b id="call-banner-nick"></b></div>
+        <div class="call-banner-sub" id="call-banner-sub">Входящий звонок</div>
+      </div>
+    </div>
+    <div class="call-banner-actions">
+      <button class="call-banner-btn reject" id="call-banner-reject-btn" type="button" title="Отклонить">
+        <svg viewBox="0 0 24 24"><path d="M6.6 4.1l2.2.3 1.6 4.2-1.9 1.4a12.6 12.6 0 0 0 5.5 5.5l1.4-1.9 4.2 1.6.3 2.2c-.9 2.6-3.7 4.3-6.6 3.7C7 19.7 4.3 17 2.9 12.7c-.6-2.9 1.1-5.7 3.7-6.6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4.6 4.6l14.8 14.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="call-banner-btn accept" id="call-banner-accept-btn" type="button" title="Ответить">
+        <svg viewBox="0 0 24 24"><path d="M6.6 3.5 9 3.9l1.6 4.2-2.1 1.6a12.5 12.5 0 0 0 5.8 5.8l1.6-2.1 4.2 1.6.4 2.4c-1 3-4.5 5.2-8 4.2C7.4 19.9 4.1 16.6 2.4 11.6c-1-3.5 1.2-7 4.2-8.1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+      </button>
     </div>
   </div>
 

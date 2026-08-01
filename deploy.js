@@ -318,7 +318,7 @@ async function testMessages(url, userIdA, userIdB, chatId) {
     await enableWorkersDev(accountId);
     const url = 'https://' + SCRIPT + '.' + subdomain + '.workers.dev';
     console.log('\nDeployed:', url);
-    await verify(url);
+    if (process.env.SKIP_VERIFY !== '1') await verify(url);
     console.log('\nSUCCESS:', url);
   } catch (e) {
     console.error('\nFAILED:', e.message);

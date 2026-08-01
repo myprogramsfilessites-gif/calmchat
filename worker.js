@@ -36,7 +36,7 @@ async function hashPassword(password, salt) {
 
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, nick: u.nick || '', avatar: u.avatar || '', createdAt: u.createdAt || 0 };
+  return { id: u.id, nick: u.nick || '', avatar: u.avatar || '', dnd: !!u.dnd, createdAt: u.createdAt || 0 };
 }
 
 function chatIdForPair(a, b) {
@@ -109,6 +109,7 @@ async function apiChangeNick(env, body) {
   user.nick = nick;
   await env.KV.put('user:' + userId, JSON.stringify(user));
   await env.KV.put('nick:' + lower, userId);
+  await notifyUserUpdated(env, user);
   return json(200, { user: publicUser(user) });
 }
 
@@ -119,6 +120,25 @@ async function apiChangeAvatar(env, body) {
   if (!user) return json(404, { error: 'Пользователь не найден' });
   user.avatar = avatar;
   await env.KV.put('user:' + userId, JSON.stringify(user));
+  await notifyUserUpdated(env, user);
+  return json(200, { user: publicUser(user) });
+}
+
+async function apiSetDnd(env, body) {
+  const userId = String(body.userId || '');
+  const dnd = !!body.dnd;
+  const user = await getUser(env, userId);
+  if (!user) return json(404, { error: 'Пользователь не найден' });
+  user.dnd = dnd;
+  await env.KV.put('user:' + userId, JSON.stringify(user));
+  try {
+    const stub = env.HUB.get(env.HUB.idFromName('global'));
+    await stub.fetch('https://hub/set-dnd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, dnd }),
+    });
+  } catch (e) {}
   return json(200, { user: publicUser(user) });
 }
 
@@ -177,6 +197,19 @@ async function notifyUser(env, userId, payload) {
       body: JSON.stringify({ userId, payload }),
     });
   } catch (e) {}
+}
+
+async function notifyUserUpdated(env, user) {
+  const raw = await env.KV.get('userchats:' + user.id);
+  const chatIds = raw ? JSON.parse(raw) : [];
+  const pu = publicUser(user);
+  for (const chatId of chatIds) {
+    const rawChat = await env.KV.get('chat:' + chatId);
+    if (!rawChat) continue;
+    const chat = JSON.parse(rawChat);
+    const otherId = chat.a === user.id ? chat.b : chat.a;
+    await notifyUser(env, otherId, { type: 'user-updated', user: pu });
+  }
 }
 
 async function addUserChat(env, userId, chatId) {
@@ -420,6 +453,7 @@ export default {
     if (path === '/api/me/nick' && method === 'POST') return apiChangeNick(env, await readBody(request));
     if (path === '/api/me/avatar' && method === 'POST') return apiChangeAvatar(env, await readBody(request));
     if (path === '/api/me/delete' && method === 'POST') return apiDeleteAccount(env, await readBody(request));
+    if (path === '/api/me/dnd' && method === 'POST') return apiSetDnd(env, await readBody(request));
 
     if (path === '/api/requests' && method === 'POST') return apiSendRequest(env, await readBody(request));
     if (path === '/api/requests' && method === 'GET') return apiListRequests(env, url.searchParams.get('userId'));
@@ -445,6 +479,7 @@ export class Hub {
     this.state = state;
     this.env = env;
     this.sockets = new Map();
+    this.dndMap = new Map();
     try {
       state.storage.sql.exec(
         'CREATE TABLE IF NOT EXISTS messages (chat_id TEXT NOT NULL, seq INTEGER NOT NULL, from_id TEXT, type TEXT, text TEXT, media_key TEXT, media_type TEXT, ts INTEGER, PRIMARY KEY (chat_id, seq))'
@@ -459,6 +494,7 @@ export class Hub {
     if (url.pathname === '/api/messages' && request.method === 'GET') return this.handleHistory(url);
     if (url.pathname === '/last' && request.method === 'GET') return this.handleLast(url);
     if (url.pathname === '/delete-chat' && request.method === 'POST') return this.handleDeleteChat(request);
+    if (url.pathname === '/set-dnd' && request.method === 'POST') return this.handleSetDnd(request);
     return new Response('not found', { status: 404 });
   }
 
@@ -495,9 +531,40 @@ export class Hub {
   async onMessage(userId, event) {
     let msg;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type === 'ping') {
+      const ws = this.sockets.get(userId);
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+      return;
+    }
     if (msg.type === 'msg') {
       await this.storeMessage(userId, msg);
-    } else if (msg.type === 'call-offer' || msg.type === 'call-answer' || msg.type === 'call-ice' ||
+    } else if (msg.type === 'call-offer') {
+      const targetId = String(msg.to || '');
+      let blocked;
+      if (this.dndMap.has(targetId)) {
+        blocked = !!this.dndMap.get(targetId);
+      } else {
+        const rawTarget = await this.env.KV.get('user:' + targetId);
+        const targetUser = rawTarget ? JSON.parse(rawTarget) : null;
+        blocked = !!(targetUser && targetUser.dnd);
+        if (targetUser) this.dndMap.set(targetId, !!targetUser.dnd);
+      }
+      if (blocked) {
+        const caller = this.sockets.get(userId);
+        if (caller && caller.readyState === 1) {
+          caller.send(JSON.stringify({
+            type: 'call-dnd',
+            chatId: String(msg.chatId || ''),
+            callerName: '',
+          }));
+        }
+        return;
+      }
+      const target = this.sockets.get(targetId);
+      if (target && target.readyState === 1) {
+        target.send(JSON.stringify({ type: msg.type, from: userId, chatId: String(msg.chatId || ''), data: msg.data || null }));
+      }
+    } else if (msg.type === 'call-answer' || msg.type === 'call-ice' ||
                msg.type === 'call-decline' || msg.type === 'call-end' ||
                msg.type === 'call-reneg-offer' || msg.type === 'call-reneg-answer') {
       const target = this.sockets.get(String(msg.to || ''));
@@ -590,6 +657,13 @@ export class Hub {
     try {
       this.state.storage.sql.exec('DELETE FROM messages WHERE chat_id=?', String(body.chatId || ''));
     } catch (e) {}
+    return json(200, { ok: true });
+  }
+
+  async handleSetDnd(request) {
+    let body;
+    try { body = await request.json(); } catch (e) { return json(400, {}); }
+    this.dndMap.set(String(body.userId || ''), !!body.dnd);
     return json(200, { ok: true });
   }
 }
