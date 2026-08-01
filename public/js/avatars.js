@@ -42,14 +42,15 @@ function renderAvatar(container, u, extraClass) {
   }
 }
 
-function buildIconGrid(container, onPick) {
+function buildIconGrid(container, onPick, initial) {
   container.innerHTML = '';
-  let chosenIcon = null;
+  let chosenIcon = initial && ICONS[initial] ? initial : null;
   ICON_KEYS.forEach((key) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'icon-opt';
     btn.appendChild(avatarSvgNode(key));
+    if (key === chosenIcon) btn.classList.add('selected');
     btn.addEventListener('click', () => {
       chosenIcon = chosenIcon === key ? null : key;
       container.querySelectorAll('.icon-opt').forEach((b) => b.classList.remove('selected'));

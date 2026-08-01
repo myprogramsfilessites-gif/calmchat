@@ -529,14 +529,34 @@
     });
   }
 
-  // profile
+  // profile / settings
   let chosenAvatar = null;
-  buildIconGrid($('avatar-picker'), (k) => { chosenAvatar = k; });
+  let delCaptcha = '';
+
+  function makeCaptcha() {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i = 0; i < 5; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+
+  function buildAvatarPicker() {
+    buildIconGrid($('avatar-picker'), (k) => {
+      chosenAvatar = k;
+      renderAvatar($('profile-modal-avatar'), { nick: user.nick, avatar: k || user.avatar });
+    }, user.avatar);
+  }
 
   function openProfile() {
     $('nick-input').value = user.nick;
     $('nick-error').textContent = '';
+    $('del-error').textContent = '';
+    $('del-captcha-input').value = '';
+    $('del-password-input').value = '';
     chosenAvatar = null;
+    buildAvatarPicker();
+    delCaptcha = makeCaptcha();
+    $('del-captcha').textContent = delCaptcha;
     openModal('profile-modal');
   }
 
@@ -563,6 +583,26 @@
     } catch (err) { $('nick-error').textContent = err.message; }
   }
 
+  function doLogout() {
+    state.leaving = true;
+    if (state.socket) { try { state.socket.close(); } catch (e) {} }
+    clearSession();
+    location.replace('index.html');
+  }
+
+  async function deleteAccount() {
+    const code = $('del-captcha-input').value.trim().toUpperCase();
+    const pass = $('del-password-input').value;
+    $('del-error').textContent = '';
+    if (code !== delCaptcha) { $('del-error').textContent = 'Код введён неверно'; return; }
+    if (!pass) { $('del-error').textContent = 'Введи пароль'; return; }
+    if (!confirm('Точно удалить аккаунт навсегда? Все чаты и сообщения будут стёрты.')) return;
+    try {
+      await api('POST', '/api/me/delete', { userId: user.id, password: pass });
+      doLogout();
+    } catch (err) { $('del-error').textContent = err.message; }
+  }
+
   // ---------- toast ----------
 
   function toast(text) {
@@ -582,6 +622,8 @@
   $('req-search').addEventListener('input', renderRequests);
   $('edit-profile-btn').addEventListener('click', openProfile);
   $('save-profile-btn').addEventListener('click', saveProfile);
+  $('logout-btn').addEventListener('click', doLogout);
+  $('delete-account-btn').addEventListener('click', deleteAccount);
   $('send-btn').addEventListener('click', sendText);
   $('msg-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendText(); });
   $('attach-btn').addEventListener('click', () => $('file-input').click());

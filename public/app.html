@@ -17,7 +17,7 @@
           <div class="p-name" id="profile-nick"></div>
           <div class="p-id">ID: <span id="profile-id"></span></div>
         </div>
-        <button class="btn ghost small" id="edit-profile-btn" type="button">Изменить</button>
+        <button class="btn ghost small" id="edit-profile-btn" type="button">Настройки</button>
       </div>
 
       <div class="search-box">
@@ -99,12 +99,30 @@
   </div>
 
   <div class="modal" id="profile-modal" hidden>
-    <div class="modal-title">Профиль</div>
+    <div class="modal-title">Настройки</div>
     <div class="avatar big center" id="profile-modal-avatar"></div>
     <p class="modal-sub center">Твой ID: <b id="profile-modal-id"></b></p>
+    <label class="field-label" for="nick-input">Ник</label>
     <input id="nick-input" placeholder="Ник" autocomplete="off" maxlength="24">
     <p class="error" id="nick-error"></p>
+    <label class="field-label" for="avatar-picker">Аватар</label>
     <div class="avatar-picker" id="avatar-picker"></div>
+
+    <div class="settings-sep"></div>
+
+    <label class="field-label">Аккаунт</label>
+    <button class="btn ghost block" id="logout-btn" type="button">Выйти из аккаунта</button>
+
+    <div class="danger-zone">
+      <label class="field-label danger-label">Удаление аккаунта</label>
+      <p class="modal-sub">Удаление навсегда: все чаты, сообщения и медиа. Отменить нельзя.</p>
+      <p class="modal-sub">Для подтверждения введи код: <b id="del-captcha" class="captcha"></b></p>
+      <input id="del-captcha-input" placeholder="Код из картинки" autocomplete="off">
+      <input id="del-password-input" type="password" placeholder="Твой пароль" autocomplete="off">
+      <p class="error" id="del-error"></p>
+      <button class="btn danger block" id="delete-account-btn" type="button">Удалить аккаунт</button>
+    </div>
+
     <div class="modal-actions">
       <button class="btn ghost" data-close="profile-modal" type="button">Закрыть</button>
       <button class="btn primary" id="save-profile-btn" type="button">Сохранить</button>

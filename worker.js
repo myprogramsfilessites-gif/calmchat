@@ -122,6 +122,50 @@ async function apiChangeAvatar(env, body) {
   return json(200, { user: publicUser(user) });
 }
 
+async function apiDeleteAccount(env, body) {
+  const userId = String(body.userId || '');
+  const pass = String(body.password || '');
+  const user = await getUser(env, userId);
+  if (!user) return json(404, { error: 'Пользователь не найден' });
+  const h = await hashPassword(pass, user.salt || '');
+  if (h !== user.passHash) return json(401, { error: 'Неверный пароль' });
+
+  const reqs = await env.KV.list({ prefix: 'req:' });
+  for (const { name } of reqs.keys) {
+    const parts = name.split(':');
+    if (parts.length >= 3 && (parts[1] === userId || parts[2] === userId)) {
+      await env.KV.delete(name);
+    }
+  }
+
+  const raw = await env.KV.get('userchats:' + userId);
+  const chatIds = raw ? JSON.parse(raw) : [];
+  for (const chatId of chatIds) {
+    const rawChat = await env.KV.get('chat:' + chatId);
+    if (!rawChat) continue;
+    const chat = JSON.parse(rawChat);
+    const otherId = chat.a === userId ? chat.b : chat.a;
+    await removeUserChat(env, otherId, chatId);
+    await env.KV.delete('chat:' + chatId);
+    try {
+      const stub = env.HUB.get(env.HUB.idFromName('global'));
+      await stub.fetch('https://hub/delete-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId }),
+      });
+    } catch (e) {}
+    const media = await env.KV.list({ prefix: 'media/' + chatId + '/' });
+    for (const { name } of media.keys) await env.KV.delete(name);
+    if (otherId) await notifyUser(env, otherId, { type: 'chat-deleted', chatId });
+  }
+
+  await env.KV.delete('userchats:' + userId);
+  await env.KV.delete('nick:' + user.nick.toLowerCase());
+  await env.KV.delete('user:' + userId);
+  return json(200, { ok: true });
+}
+
 // ---------- requests & chats ----------
 
 async function notifyUser(env, userId, payload) {
@@ -375,6 +419,7 @@ export default {
     if (path === '/api/me' && method === 'GET') return apiMe(env, url.searchParams.get('userId'));
     if (path === '/api/me/nick' && method === 'POST') return apiChangeNick(env, await readBody(request));
     if (path === '/api/me/avatar' && method === 'POST') return apiChangeAvatar(env, await readBody(request));
+    if (path === '/api/me/delete' && method === 'POST') return apiDeleteAccount(env, await readBody(request));
 
     if (path === '/api/requests' && method === 'POST') return apiSendRequest(env, await readBody(request));
     if (path === '/api/requests' && method === 'GET') return apiListRequests(env, url.searchParams.get('userId'));
